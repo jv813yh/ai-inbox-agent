@@ -17,7 +17,7 @@ import requests
 from datetime import datetime
 
 # Inicializuj Anthropic client
-client_anthropic = Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
+client_anthropic = Anthropic(api_key=os.getenv("CLAUDE_API_KEY_GITHUB_EMAIL"))
 
 class EmailSummaryBot:
     def __init__(self):
