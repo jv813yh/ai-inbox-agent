@@ -97,23 +97,31 @@ class EmailManager:
     
     def parse_email(self, msg_id: bytes) -> Dict:
         """Parse email obsah"""
-        print(f"[DEBUG] Parsing email with ID: {msg_id}") 
+        print(f"[DEBUG] Parsing email with ID: {msg_id}")
+        
         status, msg_data = self.mail.fetch(msg_id, "(RFC822)")
+        print(f"[DEBUG] Fetch status: {status}")  # ← PRIDAJ
+        
         if status != "OK":
+            print(f"[DEBUG] Fetch failed!")  # ← PRIDAJ
             return None
         
         msg = email.message_from_bytes(msg_data[0][1])
+        print(f"[DEBUG] Message parsed from bytes")  # ← PRIDAJ
         
         # Subject
         subject = decode_header(msg.get("Subject", "No Subject"))[0][0]
         if isinstance(subject, bytes):
             subject = subject.decode('utf-8', errors='ignore')
+        print(f"[DEBUG] Subject: {subject}")  # ← PRIDAJ
         
         # From
         from_addr = msg.get("From", "Unknown")
+        print(f"[DEBUG] From: {from_addr}")  # ← PRIDAJ
         
         # Body
         body = self._extract_body(msg)
+        print(f"[DEBUG] Body length: {len(body)}")  # ← PRIDAJ
         
         email_data = {
             'id': msg_id,
@@ -122,10 +130,10 @@ class EmailManager:
             'body': body[:2000],
             'date': msg.get("Date", "Unknown"),
             'message_id': msg.get("Message-ID", ""),
-            'raw_msg': msg,
-            'links': LinkExtractor.extract_links(body)  # ← PRIDAJ TOTO
+            'raw_msg': msg
         }
-
+        
+        print(f"[DEBUG] Email data created successfully")  # ← PRIDAJ
         return email_data
     
     def _extract_body(self, msg) -> str:
