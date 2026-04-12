@@ -1,0 +1,30 @@
+name: Email AI Summary
+
+on:
+  schedule:
+    - cron: '0 20 * * *'  # 20:00 (8 PM) every day
+  workflow_dispatch:      # Manual trigger
+
+jobs:
+  email-summary:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install google-auth-oauthlib google-auth-httplib2 google-api-python-client anthropic python-telegram-bot
+      
+      - name: Run Email Summary Bot
+        env:
+          GMAIL_CREDENTIALS: ${{ secrets.GMAIL_CREDENTIALS }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+        run: python email_summary_bot.py
