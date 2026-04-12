@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
-Email AI Summary Bot - Extended Version with Email Actions
+Email AI Summary Bot - Smart Filtering Version
 Features:
 - Read unread emails
+- Intelligent filtering based on subject
+- Auto-label AI_TEXT and AI_VIDEO
 - Summarize with Claude
-- Move emails to folders
-- Mark as important/spam
-- Delete emails
-- Mark as read
+- Apply actions automatically
 """
 
 import os
@@ -67,7 +66,7 @@ class EmailManager:
             except:
                 pass
     
-    def get_unread_emails(self, max_results: int = 5) -> List[Dict]:
+    def get_unread_emails(self, max_results: int = 10) -> List[Dict]:
         """Získaj nešpecifikované emaily"""
         try:
             self.mail.select("INBOX")
@@ -114,14 +113,18 @@ class EmailManager:
         # Body
         body = self._extract_body(msg)
         
-        return {
+        email_data = {
             'id': msg_id,
             'subject': subject,
             'from': from_addr,
-            'body': body[:1500],
+            'body': body[:2000],
             'date': msg.get("Date", "Unknown"),
-            'message_id': msg.get("Message-ID", "")
+            'message_id': msg.get("Message-ID", ""),
+            'raw_msg': msg,
+            'links': LinkExtractor.extract_links(body)  # ← PRIDAJ TOTO
         }
+
+        return email_data
     
     def _extract_body(self, msg) -> str:
         """Extrahuj text z emailu"""
@@ -155,17 +158,6 @@ class EmailManager:
             print(f"❌ Error marking as read: {e}")
             return False
     
-    def mark_as_unread(self, msg_ids: List[bytes]) -> bool:
-        """Označ emaily ako neprečítané"""
-        try:
-            for msg_id in msg_ids:
-                self.mail.store(msg_id, '-FLAGS', '\\Seen')
-            print(f"✅ Marked {len(msg_ids)} emails as unread")
-            return True
-        except Exception as e:
-            print(f"❌ Error marking as unread: {e}")
-            return False
-    
     def mark_as_important(self, msg_ids: List[bytes]) -> bool:
         """Označ emaily ako důležité (add IMPORTANT label)"""
         try:
@@ -177,29 +169,15 @@ class EmailManager:
             print(f"❌ Error marking as important: {e}")
             return False
     
-    def mark_as_spam(self, msg_ids: List[bytes]) -> bool:
-        """Presuň emaily do SPAM"""
-        try:
-            self.mail.select("INBOX")
-            for msg_id in msg_ids:
-                self.mail.copy(msg_id, "[Gmail]/Spam")
-                self.mail.store(msg_id, '+FLAGS', '\\Deleted')
-            print(f"✅ Marked {len(msg_ids)} emails as spam")
-            return True
-        except Exception as e:
-            print(f"❌ Error marking as spam: {e}")
-            return False
-    
-    def delete_email(self, msg_ids: List[bytes]) -> bool:
-        """Vymaž emaily"""
+    def add_label(self, msg_ids: List[bytes], label: str) -> bool:
+        """Pridaj custom label k emailom"""
         try:
             for msg_id in msg_ids:
-                self.mail.store(msg_id, '+FLAGS', '\\Deleted')
-            self.mail.expunge()
-            print(f"✅ Deleted {len(msg_ids)} emails")
+                self.mail.store(msg_id, '+X-GM-LABELS', label)
+            print(f"✅ Added label '{label}' to {len(msg_ids)} emails")
             return True
         except Exception as e:
-            print(f"❌ Error deleting emails: {e}")
+            print(f"❌ Error adding label: {e}")
             return False
     
     def move_to_folder(self, msg_ids: List[bytes], folder: str) -> bool:
@@ -207,7 +185,6 @@ class EmailManager:
         try:
             self.mail.select("INBOX")
             
-            # Gmail folder names use [Gmail]/ prefix
             gmail_folders = {
                 'archive': '[Gmail]/All Mail',
                 'drafts': '[Gmail]/Drafts',
@@ -229,24 +206,119 @@ class EmailManager:
         except Exception as e:
             print(f"❌ Error moving emails: {e}")
             return False
+
+class EmailFilter:
+    """Filtruj a klasifikuj emaily podľa subject-u"""
     
-    def add_label(self, msg_ids: List[bytes], label: str) -> bool:
-        """Pridaj custom label k emailom"""
-        try:
-            for msg_id in msg_ids:
-                self.mail.store(msg_id, '+X-GM-LABELS', label)
-            print(f"✅ Added label '{label}' to {len(msg_ids)} emails")
-            return True
-        except Exception as e:
-            print(f"❌ Error adding label: {e}")
+    # Definuj filter pravidlá
+    FILTERS = {
+        'ai_text': {
+            'keywords': ['AI interested stuff - text', 'AI stuff - text'],
+            'label': 'AI_TEXT',
+            'mark_important': True,
+            'description': 'AI Related - Text Content'
+        },
+        'ai_video': {
+            'keywords': ['AI interested stuff - video', 'AI stuff - video'],
+            'label': 'AI_VIDEO',
+            'mark_important': True,
+            'description': 'AI Related - Video Content'
+        }
+    }
+    
+    @staticmethod
+    def classify_email(email_data: Dict) -> Dict:
+        """Klasifikuj email a vráť filter info"""
+        subject = email_data['subject'].lower()
+        
+        for filter_key, filter_config in EmailFilter.FILTERS.items():
+            for keyword in filter_config['keywords']:
+                if keyword.lower() in subject:
+                    return {
+                        'matched': True,
+                        'filter_key': filter_key,
+                        'label': filter_config['label'],
+                        'mark_important': filter_config['mark_important'],
+                        'description': filter_config['description']
+                    }
+        
+        return {'matched': False}
+    
+    @staticmethod
+    def apply_filter(manager: EmailManager, email_data: Dict, filter_info: Dict) -> bool:
+        """Aplikuj filter na email"""
+        if not filter_info['matched']:
             return False
-    
-    def create_filter(self, from_addr: str, label: str) -> bool:
-        """Vytvor filter pre konkrétneho odosielateľa"""
-        # POZNÁMKA: Toto sa dá urobiť iba cez Gmail API, nie IMAP
-        # Pre teraz je to iba placeholder
-        print(f"📋 Filter rule: Emails from {from_addr} → Label: {label}")
+        
+        msg_id = email_data['id']
+        actions = []
+        
+        # Add label
+        if manager.add_label([msg_id], filter_info['label']):
+            actions.append(f"✅ Label: {filter_info['label']}")
+        
+        # Mark as important
+        if filter_info['mark_important']:
+            if manager.mark_as_important([msg_id]):
+                actions.append("⭐ Marked as important")
+        
+        print(f"\n🔄 Applied filter '{filter_info['description']}':")
+        for action in actions:
+            print(f"  {action}")
+        
         return True
+    
+
+class LinkExtractor:
+    """Extrahuj linky z emailov"""
+    
+    @staticmethod
+    def extract_links(email_body: str) -> Dict[str, List[str]]:
+        """Extrahuj všetky linky a kategorizuj ich"""
+        
+        # Regex na URLs
+        url_pattern = r'https?://[^\s\]<>"{}|\\^`]+'
+        links = re.findall(url_pattern, email_body)
+        
+        categorized = {
+            'github': [],
+            'youtube': [],
+            'other': []
+        }
+        
+        for link in links:
+            domain = urlparse(link).netloc.lower()
+            
+            if 'github.com' in domain:
+                categorized['github'].append(link)
+            elif 'youtube.com' in domain or 'youtu.be' in domain:
+                categorized['youtube'].append(link)
+            else:
+                categorized['other'].append(link)
+        
+        return categorized
+    
+    @staticmethod
+    def format_links(links: Dict[str, List[str]]) -> str:
+        """Formátuj linky na pekný výstup"""
+        output = []
+        
+        if links['github']:
+            output.append("🐙 **GitHub Repos:**")
+            for link in links['github']:
+                output.append(f"  • {link}")
+        
+        if links['youtube']:
+            output.append("🎥 **YouTube Videos:**")
+            for link in links['youtube']:
+                output.append(f"  • {link}")
+        
+        if links['other']:
+            output.append("🔗 **Other Links:**")
+            for link in links['other']:
+                output.append(f"  • {link}")
+        
+        return "\n".join(output) if output else ""
 
 class EmailBot:
     def __init__(self):
@@ -259,34 +331,66 @@ class EmailBot:
         if not emails:
             return "Žiadne emaily na spracovanie"
         
+        # Zoskupuj podľa typu
+        ai_text = [e for e in emails if 'AI_TEXT' in e.get('labels', [])]
+        ai_video = [e for e in emails if 'AI_VIDEO' in e.get('labels', [])]
+        other = [e for e in emails if 'AI_TEXT' not in e.get('labels', []) and 'AI_VIDEO' not in e.get('labels', [])]
+        
+        sections = []
+        
+        if ai_text:
+            sections.append(self._summarize_section("📝 AI Interested - Text", ai_text))
+        
+        if ai_video:
+            sections.append(self._summarize_section("🎥 AI Interested - Video", ai_video))
+        
+        if other:
+            sections.append(self._summarize_section("📧 Other Emails", other))
+        
+        return "\n\n".join(sections)
+    
+    def _summarize_section(self, title: str, emails: List[Dict]) -> str:
+        """Sumarizuj jednu sekciu emailov"""
+        if not emails:
+            return ""
+        
         emails_text = "\n\n---\n\n".join([
-            f"📧 Od: {e['from']}\n📌 Predmet: {e['subject']}\n\nObsah:\n{e['body']}"
+            f"Od: {e['from']}\nPredmet: {e['subject']}\n\nObsah:\n{e['body']}"
             for e in emails
         ])
         
-        prompt = f"""Ty si AI asistent, ktorý pomáhaš čítať a organizovať emaily.
-
-Vytvor KRÁTKE zhrnutie týchto emailov:
+        prompt = f"""Vytvor KRÁTKE zhrnutie týchto emailov v sekcii: {title}
 
 {emails_text}
 
 Požiadavky:
 1. Slovenčina
-2. Najdôležitejšie body
-3. CTA (čo urobiť?)
-4. Markdown formát
-5. Buď stručný"""
+2. Max 3-5 riadkov
+3. Vyzdvihni CTA (čo urobiť)
+4. Markdown"""
         
         try:
             response = client.messages.create(
                 model="claude-opus-4-6",
-                max_tokens=1000,
+                max_tokens=500,
                 messages=[{"role": "user", "content": prompt}]
             )
-            return response.content[0].text
+            all_links = {}
+            for e in emails:
+                for link_type, link_list in e.get('links', {}).items():
+                    if link_type not in all_links:
+                        all_links[link_type] = []
+                    all_links[link_type].extend(link_list)
+            
+            section_text = f"**{title}**\n\n{response.content[0].text}"
+            
+            if any(all_links.values()):
+                section_text += "\n\n" + LinkExtractor.format_links(all_links)
+                
+            return section_text
         except Exception as e:
             print(f"❌ Claude API Error: {e}")
-            return f"Error: {str(e)}"
+            return f"**{title}**\nError summarizing"
     
     def send_telegram(self, message: str) -> bool:
         """Pošli správu do Telegramu"""
@@ -314,24 +418,41 @@ Požiadavky:
             return False
     
     def run(self):
-        """Spusti email bot"""
-        print(f"\n🤖 Email Summary Bot started at {datetime.now()}\n")
+        """Spusti email bot s filteringom"""
+        print(f"\n🤖 Email Summary Bot (Smart Filtering) started at {datetime.now()}\n")
         
         try:
             # Connect
             self.manager.connect()
             
             # Get emails
-            emails = self.manager.get_unread_emails(max_results=5)
+            emails = self.manager.get_unread_emails(max_results=10)
             
             if not emails:
                 print("📭 No unread emails")
                 self.send_telegram("📭 Žiadne nové emaily.")
                 return
             
+            # Apply filters
+            print("\n🔍 Applying filters...")
+            filtered_emails = []
+            
+            for email_data in emails:
+                filter_info = EmailFilter.classify_email(email_data)
+                
+                if filter_info['matched']:
+                    print(f"\n✨ Matched: {email_data['subject']}")
+                    EmailFilter.apply_filter(self.manager, email_data, filter_info)
+                    email_data['labels'] = [filter_info['label']]
+                    filtered_emails.append(email_data)
+                else:
+                    print(f"\n📧 Regular: {email_data['subject']}")
+                    email_data['labels'] = []
+                    filtered_emails.append(email_data)
+            
             # Summarize
             print("\n📝 Summarizing with Claude...")
-            summary = self.summarize_emails(emails)
+            summary = self.summarize_emails(filtered_emails)
             
             # Create message
             message = f"""📧 **Email Summary** - {datetime.now().strftime('%Y-%m-%d %H:%M')}
@@ -339,15 +460,11 @@ Požiadavky:
 {summary}
 
 ---
-*Bot spustený o 20:00*"""
+*Bot spustený o 20:00 s inteligentným filteringom*"""
             
             # Send to Telegram
             print("\n📤 Sending to Telegram...")
             self.send_telegram(message)
-            
-            # Mark emails as read (optional - comment out if you want to keep them unread)
-            # msg_ids = [e['id'] for e in emails]
-            # self.manager.mark_as_read(msg_ids)
             
             print("\n✅ Done!")
             
