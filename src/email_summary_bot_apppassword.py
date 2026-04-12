@@ -78,6 +78,7 @@ class EmailManager:
             
             message_ids = messages[0].split()[:max_results]
             print(f"📧 Found {len(message_ids)} unread emails")
+            print(f"[DEBUG] Message IDs: {message_ids}")
             
             emails = []
             for msg_id in message_ids:
@@ -96,6 +97,7 @@ class EmailManager:
     
     def parse_email(self, msg_id: bytes) -> Dict:
         """Parse email obsah"""
+        print(f"[DEBUG] Parsing email with ID: {msg_id}") 
         status, msg_data = self.mail.fetch(msg_id, "(RFC822)")
         if status != "OK":
             return None
