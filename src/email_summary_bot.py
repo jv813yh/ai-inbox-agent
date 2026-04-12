@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Email AI Summary Bot
-- Číta nešpecifikované emaily z Gmailu
+Email AI Summary Bot (Version 2 - App Password)
+- Číta nešpecifikované emaily z Gmailu (cez App Password)
 - Sumarizuje ich cez Claude API
 - Pošle do Telegramu každý večer
 """
@@ -9,12 +9,9 @@ Email AI Summary Bot
 import os
 import json
 import base64
-import pickle
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.api_core.client_options import ClientOptions
-from google.cloud import gmail_v1
+import imaplib
+import email
+from email.header import decode_header
 from anthropic import Anthropic
 import requests
 from datetime import datetime
@@ -26,71 +23,109 @@ class EmailSummaryBot:
     def __init__(self):
         self.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
         self.telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
-        self.gmail_client = self._init_gmail()
         
-    def _init_gmail(self):
-        """Inicializuj Gmail API"""
-        # Credentials sú uložené v GitHub Secrets ako JSON
-        creds_json = os.getenv("GMAIL_CREDENTIALS")
-        creds = Credentials.from_authorized_user_info(json.loads(creds_json))
+        # Načítaj Gmail credentials
+        gmail_creds_json = os.getenv("GMAIL_CREDENTIALS")
+        self.gmail_creds = json.loads(gmail_creds_json)
         
-        # Refresh token ak je potrebné
-        if creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+        self.gmail_email = self.gmail_creds.get("email")
+        self.gmail_app_password = self.gmail_creds.get("app_password")
         
-        return gmail_v1.GmailService(credentials=creds)
+        if not self.gmail_email or not self.gmail_app_password:
+            raise ValueError("GMAIL_CREDENTIALS chýba 'email' alebo 'app_password'")
     
-    def get_unread_emails(self, max_results=10):
-        """Získaj prvé nešpecifikované emaily"""
+    def connect_to_gmail(self):
+        """Pripoj sa k Gmailu cez IMAP"""
         try:
-            # Query: is:unread - emaily, ktoré sú nešpecifikované
-            results = self.gmail_client.users().messages().list(
-                userId='me',
-                q='is:unread',
-                maxResults=max_results
-            ).execute()
+            mail = imaplib.IMAP4_SSL("imap.gmail.com")
+            mail.login(self.gmail_email, self.gmail_app_password)
+            mail.select("INBOX")
+            return mail
+        except imaplib.IMAP4.error as e:
+            print(f"❌ Gmail IMAP connection error: {e}")
+            print("   Skontroluj: email, app_password, alebo 2FA")
+            raise
+    
+    def get_unread_emails(self, max_results=5):
+        """Získaj nešpecifikované emaily"""
+        try:
+            mail = self.connect_to_gmail()
             
-            messages = results.get('messages', [])
-            print(f"📧 Nájdené {len(messages)} nešpecifikovaných emailov")
-            return messages
+            # Vyhľadaj nešpecifikované emaily
+            status, messages = mail.search(None, "UNSEEN")
+            
+            if status != "OK":
+                print(f"❌ Search failed: {status}")
+                return []
+            
+            message_ids = messages[0].split()[:max_results]
+            print(f"📧 Nájdené {len(message_ids)} nešpecifikovaných emailov")
+            
+            emails = []
+            for msg_id in message_ids:
+                status, msg_data = mail.fetch(msg_id, "(RFC822)")
+                if status == "OK":
+                    email_message = email.message_from_bytes(msg_data[0][1])
+                    email_data = self._parse_email(email_message, msg_id)
+                    if email_data:
+                        emails.append(email_data)
+            
+            mail.close()
+            mail.logout()
+            return emails
+            
         except Exception as e:
-            print(f"❌ Gmail error: {e}")
+            print(f"❌ Error getting unread emails: {e}")
             return []
     
-    def get_email_content(self, message_id):
-        """Získaj obsah emailu"""
+    def _parse_email(self, email_message, msg_id):
+        """Parsuj email obsah"""
         try:
-            message = self.gmail_client.users().messages().get(
-                userId='me',
-                id=message_id,
-                format='full'
-            ).execute()
+            # Subject
+            subject = self._decode_header(email_message.get("Subject", "No Subject"))
             
-            headers = message['payload']['headers']
-            subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'No Subject')
-            from_email = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown')
+            # From
+            from_email = email_message.get("From", "Unknown")
             
-            # Získaj text tela emailu
+            # Body
             body = ""
-            if 'parts' in message['payload']:
-                for part in message['payload']['parts']:
-                    if part['mimeType'] == 'text/plain':
-                        if 'data' in part['body']:
-                            body = base64.urlsafe_b64decode(part['body']['data']).decode('utf-8')
+            if email_message.is_multipart():
+                for part in email_message.walk():
+                    if part.get_content_type() == "text/plain":
+                        try:
+                            body = part.get_payload(decode=True).decode('utf-8')
+                        except:
+                            body = part.get_payload(decode=True).decode('latin-1')
                         break
             else:
-                if 'body' in message['payload'] and 'data' in message['payload']['body']:
-                    body = base64.urlsafe_b64decode(message['payload']['body']['data']).decode('utf-8')
+                try:
+                    body = email_message.get_payload(decode=True).decode('utf-8')
+                except:
+                    body = email_message.get_payload(decode=True).decode('latin-1')
             
             return {
-                'id': message_id,
+                'id': msg_id,
                 'subject': subject,
                 'from': from_email,
                 'body': body[:2000]  # Limituj na 2000 znakov
             }
         except Exception as e:
-            print(f"❌ Error getting email content: {e}")
+            print(f"⚠️ Error parsing email: {e}")
             return None
+    
+    def _decode_header(self, header_text):
+        """Dekóduj email header"""
+        try:
+            decoded_parts = decode_header(header_text)
+            result = ""
+            for part, encoding in decoded_parts:
+                if isinstance(part, bytes):
+                    result += part.decode(encoding or 'utf-8')
+                else:
+                    result += part
+            return result
+        except:
+            return str(header_text)
     
     def summarize_emails(self, emails):
         """Sumarizuj emaily cez Claude API"""
@@ -114,6 +149,7 @@ POŽIADAVKY:
 3. Vyzdvihni akýchkoľvek CTA (calls to action) - čo je potrebné urobiť
 4. Formátuj výstup tak, aby sa dobre čítal v Telegramu (Markdown)
 5. Ak je veľa emailov, zoskupuj ich podľa tém
+6. Buď stručný a na vec
 
 Vráť výstup v Markdowne s jasnou štruktúrou."""
         
@@ -138,59 +174,44 @@ Vráť výstup v Markdowne s jasnou štruktúrou."""
             response = requests.post(url, json=payload)
             if response.status_code == 200:
                 print("✅ Telegram message sent successfully")
+                return True
             else:
                 print(f"❌ Telegram error: {response.text}")
+                return False
         except Exception as e:
             print(f"❌ Error sending to Telegram: {e}")
-    
-    def mark_as_read(self, message_ids):
-        """Označ emaily ako prečítané"""
-        try:
-            self.gmail_client.users().messages().batchModify(
-                userId='me',
-                body={'ids': message_ids, 'addLabelIds': ['IMPORTANT']}
-            ).execute()
-            print(f"✅ Marked {len(message_ids)} emails as important")
-        except Exception as e:
-            print(f"⚠️ Could not mark emails: {e}")
+            return False
     
     def run(self):
         """Spusti celý bot"""
         print(f"\n🤖 Email Summary Bot started at {datetime.now()}")
         
-        # 1. Získaj nešpecifikované emaily
-        unread_messages = self.get_unread_emails(max_results=5)
-        
-        if not unread_messages:
-            self.send_to_telegram("📭 Žiadne nové emaily na spracovanie.")
-            return
-        
-        # 2. Získaj obsah emailov
-        emails = []
-        message_ids = []
-        for msg in unread_messages:
-            email_data = self.get_email_content(msg['id'])
-            if email_data:
-                emails.append(email_data)
-                message_ids.append(msg['id'])
-        
-        # 3. Sumarizuj cez Claude
-        summary = self.summarize_emails(emails)
-        
-        # 4. Pošli do Telegramu
-        telegram_message = f"""📧 **Email Summary** - {datetime.now().strftime('%Y-%m-%d %H:%M')}
+        try:
+            # 1. Získaj nešpecifikované emaily
+            emails = self.get_unread_emails(max_results=5)
+            
+            if not emails:
+                self.send_to_telegram("📭 Žiadne nové emaily na spracovanie.")
+                return
+            
+            # 2. Sumarizuj cez Claude
+            summary = self.summarize_emails(emails)
+            
+            # 3. Pošli do Telegramu
+            telegram_message = f"""📧 **Email Summary** - {datetime.now().strftime('%Y-%m-%d %H:%M')}
 
 {summary}
 
 ---
 *Bot spustený automaticky o 20:00*"""
-        
-        self.send_to_telegram(telegram_message)
-        
-        # 5. Označ ako prečítané
-        self.mark_as_read(message_ids)
-        
-        print("✅ Email summary completed")
+            
+            self.send_to_telegram(telegram_message)
+            
+            print("✅ Email summary completed")
+            
+        except Exception as e:
+            print(f"❌ Fatal error: {e}")
+            self.send_to_telegram(f"❌ Email Bot Error: {str(e)}")
 
 if __name__ == "__main__":
     bot = EmailSummaryBot()

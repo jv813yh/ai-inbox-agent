@@ -2,8 +2,8 @@ name: Email AI Summary
 
 on:
   schedule:
-    - cron: '0 20 * * *'  # 20:00 (8 PM) every day
-  workflow_dispatch:      # Manual trigger
+    - cron: '0 20 * * *'  # 20:00 (8 PM) každý deň
+  workflow_dispatch:      # Manuálne spustenie
 
 jobs:
   email-summary:
@@ -27,4 +27,4 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
-        run: python email_summary_bot.py
+        run: python email_summary_bot_apppassword.py
