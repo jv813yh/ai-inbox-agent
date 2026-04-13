@@ -1,12 +1,6 @@
 #!/usr/bin/env python3
 """
-Email AI Summary Bot - Smart Filtering Version
-Features:
-- Read unread emails
-- Intelligent filtering based on subject
-- Auto-label AI_TEXT and AI_VIDEO
-- Summarize with Claude
-- Apply actions automatically
+Email AI Summary Bot - Smart Filtering with Content Extraction
 """
 
 import os
@@ -18,6 +12,16 @@ from anthropic import Anthropic
 import requests
 from datetime import datetime
 from typing import List, Dict
+import sys
+
+# Pridaj src do path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+try:
+    from extractors import YouTubeExtractor, GitHubExtractor, ContentPreparator
+except ImportError:
+    print("❌ Error: extractors.py not found in src/")
+    sys.exit(1)
 
 # Anthropic client
 client = Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
@@ -78,7 +82,6 @@ class EmailManager:
             
             message_ids = messages[0].split()[:max_results]
             print(f"📧 Found {len(message_ids)} unread emails")
-            print(f"[DEBUG] Message IDs: {message_ids}")
             
             emails = []
             for msg_id in message_ids:
@@ -97,44 +100,32 @@ class EmailManager:
     
     def parse_email(self, msg_id: bytes) -> Dict:
         """Parse email obsah"""
-        print(f"[DEBUG] Parsing email with ID: {msg_id}")
-        
         status, msg_data = self.mail.fetch(msg_id, "(RFC822)")
-        print(f"[DEBUG] Fetch status: {status}")  # ← PRIDAJ
-        
         if status != "OK":
-            print(f"[DEBUG] Fetch failed!")  # ← PRIDAJ
             return None
         
         msg = email.message_from_bytes(msg_data[0][1])
-        print(f"[DEBUG] Message parsed from bytes")  # ← PRIDAJ
         
         # Subject
         subject = decode_header(msg.get("Subject", "No Subject"))[0][0]
         if isinstance(subject, bytes):
             subject = subject.decode('utf-8', errors='ignore')
-        print(f"[DEBUG] Subject: {subject}")  # ← PRIDAJ
         
         # From
         from_addr = msg.get("From", "Unknown")
-        print(f"[DEBUG] From: {from_addr}")  # ← PRIDAJ
         
         # Body
         body = self._extract_body(msg)
-        print(f"[DEBUG] Body length: {len(body)}")  # ← PRIDAJ
         
-        email_data = {
+        return {
             'id': msg_id,
             'subject': subject,
             'from': from_addr,
-            'body': body[:2000],
+            'body': body[:5000],
             'date': msg.get("Date", "Unknown"),
             'message_id': msg.get("Message-ID", ""),
             'raw_msg': msg
         }
-        
-        print(f"[DEBUG] Email data created successfully")  # ← PRIDAJ
-        return email_data
     
     def _extract_body(self, msg) -> str:
         """Extrahuj text z emailu"""
@@ -155,21 +146,8 @@ class EmailManager:
         
         return body
     
-    # ======== EMAIL ACTIONS ========
-    
-    def mark_as_read(self, msg_ids: List[bytes]) -> bool:
-        """Označ emaily ako prečítané"""
-        try:
-            for msg_id in msg_ids:
-                self.mail.store(msg_id, '+FLAGS', '\\Seen')
-            print(f"✅ Marked {len(msg_ids)} emails as read")
-            return True
-        except Exception as e:
-            print(f"❌ Error marking as read: {e}")
-            return False
-    
     def mark_as_important(self, msg_ids: List[bytes]) -> bool:
-        """Označ emaily ako důležité (add IMPORTANT label)"""
+        """Označ emaily ako důležité"""
         try:
             for msg_id in msg_ids:
                 self.mail.store(msg_id, '+FLAGS', '\\Flagged')
@@ -189,38 +167,10 @@ class EmailManager:
         except Exception as e:
             print(f"❌ Error adding label: {e}")
             return False
-    
-    def move_to_folder(self, msg_ids: List[bytes], folder: str) -> bool:
-        """Presuň emaily do priečinka"""
-        try:
-            self.mail.select("INBOX")
-            
-            gmail_folders = {
-                'archive': '[Gmail]/All Mail',
-                'drafts': '[Gmail]/Drafts',
-                'sent': '[Gmail]/Sent Mail',
-                'spam': '[Gmail]/Spam',
-                'trash': '[Gmail]/Trash',
-                'important': '[Gmail]/Important'
-            }
-            
-            target_folder = gmail_folders.get(folder.lower(), folder)
-            
-            for msg_id in msg_ids:
-                self.mail.copy(msg_id, target_folder)
-                self.mail.store(msg_id, '+FLAGS', '\\Deleted')
-            
-            self.mail.expunge()
-            print(f"✅ Moved {len(msg_ids)} emails to {target_folder}")
-            return True
-        except Exception as e:
-            print(f"❌ Error moving emails: {e}")
-            return False
 
 class EmailFilter:
     """Filtruj a klasifikuj emaily podľa subject-u"""
     
-    # Definuj filter pravidlá
     FILTERS = {
         'ai_text': {
             'keywords': ['AI interested stuff - text', 'AI stuff - text'],
@@ -277,130 +227,12 @@ class EmailFilter:
             print(f"  {action}")
         
         return True
-    
-
-class LinkExtractor:
-    """Extrahuj linky z emailov"""
-    
-    @staticmethod
-    def extract_links(email_body: str) -> Dict[str, List[str]]:
-        """Extrahuj všetky linky a kategorizuj ich"""
-        
-        # Regex na URLs
-        url_pattern = r'https?://[^\s\]<>"{}|\\^`]+'
-        links = re.findall(url_pattern, email_body)
-        
-        categorized = {
-            'github': [],
-            'youtube': [],
-            'other': []
-        }
-        
-        for link in links:
-            domain = urlparse(link).netloc.lower()
-            
-            if 'github.com' in domain:
-                categorized['github'].append(link)
-            elif 'youtube.com' in domain or 'youtu.be' in domain:
-                categorized['youtube'].append(link)
-            else:
-                categorized['other'].append(link)
-        
-        return categorized
-    
-    @staticmethod
-    def format_links(links: Dict[str, List[str]]) -> str:
-        """Formátuj linky na pekný výstup"""
-        output = []
-        
-        if links['github']:
-            output.append("🐙 **GitHub Repos:**")
-            for link in links['github']:
-                output.append(f"  • {link}")
-        
-        if links['youtube']:
-            output.append("🎥 **YouTube Videos:**")
-            for link in links['youtube']:
-                output.append(f"  • {link}")
-        
-        if links['other']:
-            output.append("🔗 **Other Links:**")
-            for link in links['other']:
-                output.append(f"  • {link}")
-        
-        return "\n".join(output) if output else ""
 
 class EmailBot:
     def __init__(self):
         self.manager = EmailManager()
         self.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
         self.telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
-    
-    def summarize_emails(self, emails: List[Dict]) -> str:
-        """Sumarizuj emaily cez Claude"""
-        if not emails:
-            return "Žiadne emaily na spracovanie"
-        
-        # Zoskupuj podľa typu
-        ai_text = [e for e in emails if 'AI_TEXT' in e.get('labels', [])]
-        ai_video = [e for e in emails if 'AI_VIDEO' in e.get('labels', [])]
-        other = [e for e in emails if 'AI_TEXT' not in e.get('labels', []) and 'AI_VIDEO' not in e.get('labels', [])]
-        
-        sections = []
-        
-        if ai_text:
-            sections.append(self._summarize_section("📝 AI Interested - Text", ai_text))
-        
-        if ai_video:
-            sections.append(self._summarize_section("🎥 AI Interested - Video", ai_video))
-        
-        if other:
-            sections.append(self._summarize_section("📧 Other Emails", other))
-        
-        return "\n\n".join(sections)
-    
-    def _summarize_section(self, title: str, emails: List[Dict]) -> str:
-        """Sumarizuj jednu sekciu emailov"""
-        if not emails:
-            return ""
-        
-        emails_text = "\n\n---\n\n".join([
-            f"Od: {e['from']}\nPredmet: {e['subject']}\n\nObsah:\n{e['body']}"
-            for e in emails
-        ])
-        
-        prompt = f"""Vytvor KRÁTKE zhrnutie týchto emailov v sekcii: {title}
-
-{emails_text}
-
-Požiadavky:
-1. Slovenčina
-2. Max 3-5 riadkov
-3. Vyzdvihni CTA (čo urobiť)
-4. Markdown"""
-        
-        try:
-            response = client.messages.create(
-                model="claude-opus-4-6",
-                max_tokens=500,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            all_links = {}
-            for e in emails:
-                for link_type, link_list in e.get('links', {}).items():
-                    if link_type not in all_links:
-                        all_links[link_type] = []
-                    all_links[link_type].extend(link_list)
-            
-            section_text = f"**{title}**\n\n{response.content[0].text}"
-            
-            if any(all_links.values()):
-                section_text += "\n\n" + LinkExtractor.format_links(all_links)
-                
-            return section_text
-        except Exception as e:
-            print(f"❌ Claude API Error: {e}")
-            return f"**{title}**\nError summarizing"
     
     def send_telegram(self, message: str) -> bool:
         """Pošli správu do Telegramu"""
@@ -428,14 +260,14 @@ Požiadavky:
             return False
     
     def run(self):
-        """Spusti email bot s filteringom"""
-        print(f"\n🤖 Email Summary Bot (Smart Filtering) started at {datetime.now()}\n")
+        """Spusti email bot s úplným content extracting"""
+        print(f"\n🤖 Email Summary Bot (Full Content Extraction) started at {datetime.now()}\n")
         
         try:
-            # Connect
+            # 1. Connect
             self.manager.connect()
             
-            # Get emails
+            # 2. Get emails
             emails = self.manager.get_unread_emails(max_results=10)
             
             if not emails:
@@ -443,46 +275,92 @@ Požiadavky:
                 self.send_telegram("📭 Žiadne nové emaily.")
                 return
             
-            # Apply filters
-            print("\n🔍 Applying filters...")
-            filtered_emails = []
+            # 3. Initialize content storage
+            all_content = {
+                'youtube': [],
+                'github': [],
+                'emails_processed': len(emails),
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            # 4. Apply filters and extract content
+            print("\n🔍 Processing emails and extracting content...\n")
             
             for email_data in emails:
-                filter_info = EmailFilter.classify_email(email_data)
+                print(f"\n📨 Processing: {email_data['subject']}")
                 
+                # Apply email filters
+                filter_info = EmailFilter.classify_email(email_data)
                 if filter_info['matched']:
-                    print(f"\n✨ Matched: {email_data['subject']}")
                     EmailFilter.apply_filter(self.manager, email_data, filter_info)
-                    email_data['labels'] = [filter_info['label']]
-                    filtered_emails.append(email_data)
-                else:
-                    print(f"\n📧 Regular: {email_data['subject']}")
-                    email_data['labels'] = []
-                    filtered_emails.append(email_data)
+                
+                body = email_data['body']
+                
+                # Extract YouTube links
+                yt_urls = YouTubeExtractor.extract_youtube_links(body)
+                if yt_urls:
+                    print(f"\n🎥 Found {len(yt_urls)} YouTube video(s)")
+                    yt_data = ContentPreparator.prepare_youtube_batch(yt_urls)
+                    all_content['youtube'].extend(yt_data)
+                
+                # Extract GitHub links
+                gh_urls = GitHubExtractor.extract_github_links(body)
+                if gh_urls:
+                    print(f"\n🐙 Found {len(gh_urls)} GitHub repo(s)")
+                    gh_data = ContentPreparator.prepare_github_batch(gh_urls)
+                    all_content['github'].extend(gh_data)
             
-            # Summarize
-            print("\n📝 Summarizing with Claude...")
-            summary = self.summarize_emails(filtered_emails)
+            # 5. Save prepared data to JSON
+            print("\n\n💾 Saving prepared data...")
+            with open('prepared_content.json', 'w', encoding='utf-8') as f:
+                json.dump(all_content, f, indent=2, ensure_ascii=False)
+            print("✅ Data saved to prepared_content.json")
             
-            # Create message
-            message = f"""📧 **Email Summary** - {datetime.now().strftime('%Y-%m-%d %H:%M')}
-
-{summary}
-
----
-*Bot spustený o 20:00 s inteligentným filteringom*"""
+            # 6. Create Telegram summary
+            telegram_message = self._create_summary_message(all_content)
             
-            # Send to Telegram
+            # 7. Send to Telegram
             print("\n📤 Sending to Telegram...")
-            self.send_telegram(message)
+            self.send_telegram(telegram_message)
             
             print("\n✅ Done!")
             
         except Exception as e:
             print(f"\n❌ Fatal error: {e}")
+            import traceback
+            traceback.print_exc()
             self.send_telegram(f"❌ Bot Error: {str(e)}")
         finally:
             self.manager.disconnect()
+    
+    def _create_summary_message(self, content: Dict) -> str:
+        """Vytvor sumarizovanú Telegram správu"""
+        message = f"📧 **Email Summary** - {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+        
+        # YouTube section
+        if content['youtube']:
+            message += "🎥 **YouTube Videos:**\n\n"
+            for i, video in enumerate(content['youtube'], 1):
+                message += f"**{i}. {video.get('title', 'Unknown')}**\n"
+                message += f"🔗 {video['url']}\n"
+                message += f"📝 {video.get('summary', '')[:300]}...\n"
+                if video.get('has_full_transcript'):
+                    message += "✅ Full transcript available\n"
+                message += "\n"
+        
+        # GitHub section
+        if content['github']:
+            message += "🐙 **GitHub Repos:**\n\n"
+            for i, repo in enumerate(content['github'], 1):
+                message += f"**{i}. {repo['owner']}/{repo['repo']}**\n"
+                message += f"🔗 {repo['url']}\n"
+                message += f"⭐ Stars: {repo.get('stars', 0)}\n"
+                message += f"📝 {repo.get('summary', '')[:300]}...\n\n"
+        
+        message += f"\n---\n*Processed {content['emails_processed']} email(s)*\n"
+        message += "*Full data saved to prepared_content.json*"
+        
+        return message
 
 if __name__ == "__main__":
     bot = EmailBot()
