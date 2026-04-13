@@ -14,14 +14,8 @@ from datetime import datetime
 from typing import List, Dict
 import sys
 
-# Pridaj src do path
-sys.path.insert(0, os.path.dirname(__file__))
+from src.extractors import YouTubeExtractor, GitHubExtractor, ContentPreparator
 
-try:
-    from extractors import YouTubeExtractor, GitHubExtractor, ContentPreparator
-except ImportError:
-    print("❌ Error: extractors.py not found in src/")
-    sys.exit(1)
 
 # Anthropic client
 client = Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
