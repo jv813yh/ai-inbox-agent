@@ -15,7 +15,7 @@ from typing import List, Dict
 import sys
 
 # Pridaj src do path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.dirname(__file__))
 
 try:
     from extractors import YouTubeExtractor, GitHubExtractor, ContentPreparator
