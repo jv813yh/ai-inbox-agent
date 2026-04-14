@@ -8,6 +8,7 @@ import json
 import imaplib
 import email
 from email.header import decode_header
+import re
 from anthropic import Anthropic
 import requests
 from datetime import datetime
@@ -228,30 +229,93 @@ class EmailBot:
         self.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
         self.telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
     
+    def _safe_html(self, text: str) -> str:
+        """Convert to Telegram-safe HTML properly"""
+        # Step 1: Escape all HTML special chars
+        text = text.replace('&', '&amp;')
+        text = text.replace('<', '&lt;')
+        text = text.replace('>', '&gt;')
+        
+        # Step 2: Convert markdown to HTML tags
+        # Headers ## Title → <b>Title</b>
+        text = re.sub(r'^#{1,3}\s+(.+)$', r'<b>\1</b>', text, flags=re.MULTILINE)
+        
+        # **bold** → <b>bold</b>
+        text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+        
+        # *italic* → <i>italic</i> (but not bullet points)
+        text = re.sub(r'(?<!\w)\*(?!\s)(.+?)(?<!\s)\*(?!\w)', r'<i>\1</i>', text)
+        
+        # `code` → <code>code</code>
+        text = re.sub(r'`(.+?)`', r'<code>\1</code>', text)
+        
+        # --- horizontal rules → just a line
+        text = re.sub(r'^-{3,}$', '───────────────', text, flags=re.MULTILINE)
+        
+        return text
+    
+    def _strip_html(self, text: str) -> str:
+        """Remove HTML tags for plain text fallback"""
+        text = text.replace('<b>', '').replace('</b>', '')
+        text = text.replace('<i>', '').replace('</i>', '')
+        text = text.replace('<code>', '').replace('</code>', '')
+        text = text.replace('&amp;', '&')
+        text = text.replace('&lt;', '<')
+        text = text.replace('&gt;', '>')
+        return text
+    
     def send_telegram(self, message: str) -> bool:
-        """Pošli správu do Telegramu"""
+        """Send message to Telegram with HTML formatting, chunking, and plain text fallback"""
         if not self.telegram_token or not self.telegram_chat_id:
             print("❌ Telegram config missing!")
             return False
         
         url = f"https://api.telegram.org/bot{self.telegram_token}/sendMessage"
-        payload = {
-            'chat_id': self.telegram_chat_id,
-            'text': message,
-            'parse_mode': 'Markdown'
-        }
+        html_message = self._safe_html(message)
         
-        try:
-            response = requests.post(url, json=payload, timeout=10)
-            if response.status_code == 200:
-                print("✅ Telegram message sent")
-                return True
-            else:
-                print(f"❌ Telegram error: {response.text}")
-                return False
-        except Exception as e:
-            print(f"❌ Telegram exception: {e}")
-            return False
+        # Split long messages (Telegram limit is 4096 chars)
+        max_len = 4000
+        chunks = []
+        while len(html_message) > max_len:
+            split_at = html_message.rfind('\n', 0, max_len)
+            if split_at == -1:
+                split_at = max_len
+            chunks.append(html_message[:split_at])
+            html_message = html_message[split_at:].lstrip('\n')
+        chunks.append(html_message)
+        
+        success = True
+        for i, chunk in enumerate(chunks):
+            payload = {
+                'chat_id': self.telegram_chat_id,
+                'text': chunk,
+                'parse_mode': 'HTML',
+            }
+            
+            try:
+                resp = requests.post(url, json=payload, timeout=30)
+                if resp.status_code == 200:
+                    print(f"  ✅ Chunk {i+1}/{len(chunks)} sent")
+                else:
+                    # Fallback: send as plain text
+                    print(f"  ⚠️ HTML failed ({resp.status_code}), sending plain text...")
+                    payload_plain = {
+                        'chat_id': self.telegram_chat_id,
+                        'text': self._strip_html(chunk),
+                    }
+                    resp2 = requests.post(url, json=payload_plain, timeout=30)
+                    if resp2.status_code == 200:
+                        print(f"  ✅ Chunk {i+1}/{len(chunks)} sent (plain)")
+                    else:
+                        print(f"  ❌ Chunk {i+1} failed: {resp2.text}")
+                        success = False
+            except Exception as e:
+                print(f"  ❌ Error sending chunk {i+1}: {e}")
+                success = False
+        
+        if success:
+            print("✅ Telegram message sent")
+        return success
     
     def run(self):
         """Spusti email bot s úplným content extracting"""
