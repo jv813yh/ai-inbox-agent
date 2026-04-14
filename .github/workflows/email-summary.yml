@@ -19,7 +19,8 @@ jobs:
       
       - name: Install dependencies
         run: |
-          pip install google-auth-oauthlib google-auth-httplib2 google-api-python-client anthropic python-telegram-bot
+          pip install -r requirements.txt
+          pip install yt-dlp python-telegram-bot google-auth-httplib2 google-api-python-client pyyaml
       
       - name: Run Email Summary Bot
         env:
