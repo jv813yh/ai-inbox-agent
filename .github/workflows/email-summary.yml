@@ -28,5 +28,6 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY_GITHUB_EMAIL }}
+          SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
         working-directory: src
         run: python email_summary_bot_apppassword.py
