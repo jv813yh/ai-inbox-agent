@@ -95,7 +95,7 @@ class EmailManager:
     
     def parse_email(self, msg_id: bytes) -> Dict:
         """Parse email obsah"""
-        status, msg_data = self.mail.fetch(msg_id, "(RFC822)")
+        status, msg_data = self.mail.fetch(msg_id, "(BODY.PEEK[])")
         if status != "OK":
             return None
         
@@ -141,6 +141,17 @@ class EmailManager:
         
         return body
     
+    def mark_as_read(self, msg_ids: List[bytes]) -> bool:
+        """Mark emails as read (SEEN) after successful processing"""
+        try:
+            for msg_id in msg_ids:
+                self.mail.store(msg_id, '+FLAGS', '\\Seen')
+            print(f"✅ Marked {len(msg_ids)} emails as read")
+            return True
+        except Exception as e:
+            print(f"❌ Error marking as read: {e}")
+            return False
+
     def mark_as_important(self, msg_ids: List[bytes]) -> bool:
         """Označ emaily ako důležité"""
         try:
@@ -380,6 +391,10 @@ class EmailBot:
             # 7. Send to Telegram
             print("\n📤 Sending to Telegram...")
             self.send_telegram(telegram_message)
+            
+            # 8. Mark emails as read only after successful processing
+            processed_ids = [e['id'] for e in emails]
+            self.manager.mark_as_read(processed_ids)
             
             print("\n✅ Done!")
             
