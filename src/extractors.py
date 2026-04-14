@@ -7,6 +7,7 @@ Prepares data structures for vector database
 
 import re
 import json
+import os
 import requests
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -25,7 +26,7 @@ try:
 except ImportError:
     HAS_TRANSCRIPT_API = False
 
-client = Anthropic()
+client = Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
 
 class YouTubeExtractor:
     """Extract YouTube video info, transcripts and summarize"""
