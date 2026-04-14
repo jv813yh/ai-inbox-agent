@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import List, Dict
 import sys
 
-from src.extractors import YouTubeExtractor, GitHubExtractor, ContentPreparator
+from extractors import YouTubeExtractor, GitHubExtractor, ContentPreparator
 
 
 # Anthropic client
