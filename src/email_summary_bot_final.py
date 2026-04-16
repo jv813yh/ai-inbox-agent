@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Email AI Summary Bot - Smart Filtering with Content Extraction
+Email AI Summary Bot - Full Content Extraction with Detailed Telegram Messages
 """
 
 import os
@@ -18,7 +18,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 try:
-    from extractors_full import YouTubeExtractor, GitHubExtractor, ContentPreparator
+    from extractors import YouTubeExtractor, GitHubExtractor, ContentPreparator
 except ImportError:
     print("❌ Error: extractors.py not found in src/")
     sys.exit(1)
@@ -235,29 +235,71 @@ class EmailBot:
         self.telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
     
     def send_telegram(self, message: str) -> bool:
-        """Pošli správu do Telegramu"""
+        """Pošli správu do Telegramu (s support pre dlhé správy)"""
         if not self.telegram_token or not self.telegram_chat_id:
             print("❌ Telegram config missing!")
             return False
         
         url = f"https://api.telegram.org/bot{self.telegram_token}/sendMessage"
-        payload = {
-            'chat_id': self.telegram_chat_id,
-            'text': message,
-            'parse_mode': 'Markdown'
-        }
         
-        try:
-            response = requests.post(url, json=payload, timeout=10)
-            if response.status_code == 200:
-                print("✅ Telegram message sent")
-                return True
-            else:
-                print(f"❌ Telegram error: {response.text}")
+        # Telegram limit je 4096 znakov, takže rozdelíme na časti
+        max_length = 4096
+        
+        if len(message) <= max_length:
+            # Kratká správa — pošli naraz
+            payload = {
+                'chat_id': self.telegram_chat_id,
+                'text': message,
+                'parse_mode': 'Markdown'
+            }
+            
+            try:
+                response = requests.post(url, json=payload, timeout=10)
+                if response.status_code == 200:
+                    print("✅ Telegram message sent")
+                    return True
+                else:
+                    print(f"❌ Telegram error: {response.text}")
+                    return False
+            except Exception as e:
+                print(f"❌ Telegram exception: {e}")
                 return False
-        except Exception as e:
-            print(f"❌ Telegram exception: {e}")
-            return False
+        else:
+            # Dlhá správa — rozdelíme na časti
+            parts = []
+            current_part = ""
+            
+            lines = message.split('\n')
+            for line in lines:
+                if len(current_part) + len(line) + 1 > max_length:
+                    if current_part:
+                        parts.append(current_part)
+                    current_part = line
+                else:
+                    current_part += '\n' + line if current_part else line
+            
+            if current_part:
+                parts.append(current_part)
+            
+            # Pošli všetky časti
+            for i, part in enumerate(parts):
+                payload = {
+                    'chat_id': self.telegram_chat_id,
+                    'text': part,
+                    'parse_mode': 'Markdown'
+                }
+                
+                try:
+                    response = requests.post(url, json=payload, timeout=10)
+                    if response.status_code != 200:
+                        print(f"❌ Telegram error on part {i+1}: {response.text}")
+                        return False
+                except Exception as e:
+                    print(f"❌ Telegram exception on part {i+1}: {e}")
+                    return False
+            
+            print(f"✅ Sent {len(parts)} Telegram messages")
+            return True
     
     def run(self):
         """Spusti email bot s úplným content extracting"""
@@ -312,16 +354,29 @@ class EmailBot:
             
             # 5. Save prepared data to JSON
             print("\n\n💾 Saving prepared data...")
-            with open('prepared_content.json', 'w', encoding='utf-8') as f:
-                json.dump(all_content, f, indent=2, ensure_ascii=False)
-            print("✅ Data saved to prepared_content.json")
             
-            # 6. Create Telegram summary
-            telegram_message = self._create_summary_message(all_content)
+            # Ensure we're in the right directory
+            output_file = 'prepared_content.json'
+            
+            with open(output_file, 'w', encoding='utf-8') as f:
+                json.dump(all_content, f, indent=2, ensure_ascii=False)
+            
+            print(f"✅ Data saved to {output_file}")
+            
+            # Verify file was created
+            if os.path.exists(output_file):
+                print(f"✅ File exists: {os.path.abspath(output_file)}")
+            else:
+                print(f"❌ File not created!")
+            
+            # 6. Create Telegram messages
+            print("\n📤 Creating Telegram messages...")
+            telegram_messages = self._create_summary_messages(all_content)
             
             # 7. Send to Telegram
-            print("\n📤 Sending to Telegram...")
-            self.send_telegram(telegram_message)
+            for i, msg in enumerate(telegram_messages, 1):
+                print(f"\n📤 Sending message {i}/{len(telegram_messages)}...")
+                self.send_telegram(msg)
             
             print("\n✅ Done!")
             
@@ -333,48 +388,53 @@ class EmailBot:
         finally:
             self.manager.disconnect()
     
-    def _create_summary_message(self, content: Dict) -> str:
-        """Vytvor sumarizovanú Telegram správu s detailnými sumármi"""
-        message = f"📧 **Email Summary** - {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+    def _create_summary_messages(self, content: Dict) -> List[str]:
+        """Vytvor Telegram správy s detailným obsahom (môže byť viacero)"""
+        messages = []
+        
+        # Header message
+        header = f"📧 **Email Summary** - {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+        header += f"✅ Spracované {content['emails_processed']} email(ov)\n\n"
+        messages.append(header)
         
         # YouTube section
         if content['youtube']:
-            message += "🎥 **YouTube Videos - Podrobné Poznámky:**\n\n"
             for i, video in enumerate(content['youtube'], 1):
-                message += f"**{i}. {video.get('title', 'Unknown')}**\n"
-                message += f"🔗 {video['url']}\n"
+                msg = f"🎥 **YouTube Video {i}**\n\n"
+                msg += f"**{video.get('title', 'Unknown')}**\n"
+                msg += f"🔗 {video['url']}\n\n"
                 
-                # Show detailed notes (first 500 chars)
+                # Detailed notes
                 notes = video.get('detailed_notes', '')
                 if notes:
-                    message += f"\n📝 {notes[:600]}...\n"
+                    msg += f"📝 **Poznámky:**\n{notes}\n"
                 
                 if video.get('has_full_transcript'):
-                    message += "✅ Úplný prepis dostupný\n"
+                    msg += "\n✅ Úplný prepis dostupný v prepared_content.json\n"
                 
-                message += "\n---\n\n"
+                messages.append(msg)
         
         # GitHub section
         if content['github']:
-            message += "🐙 **GitHub Repos - Detailná Analýza:**\n\n"
             for i, repo in enumerate(content['github'], 1):
-                message += f"**{i}. {repo['owner']}/{repo['repo']}**\n"
-                message += f"🔗 {repo['url']}\n"
-                message += f"⭐ Stars: {repo.get('stars', 0)}\n"
+                msg = f"🐙 **GitHub Repo {i}**\n\n"
+                msg += f"**{repo['owner']}/{repo['repo']}**\n"
+                msg += f"🔗 {repo['url']}\n"
+                msg += f"⭐ Stars: {repo.get('stars', 0)}\n\n"
                 
-                # Show detailed summary (first 500 chars)
+                # Detailed summary
                 summary = repo.get('detailed_summary', '')
                 if summary:
-                    message += f"\n📝 {summary[:600]}...\n"
-                else:
-                    message += f"📝 {repo.get('summary', '')[:600]}...\n"
+                    msg += f"📝 **Analýza:**\n{summary}\n"
                 
-                message += "\n---\n\n"
+                messages.append(msg)
         
-        message += f"\n✅ Spracované {content['emails_processed']} email(ov)\n"
-        message += "*Podrobné dáta uložené v prepared_content.json*"
+        # Final message
+        final = f"\n✅ **Všetky dáta uložené v prepared_content.json**\n"
+        final += f"Timestamp: {content['timestamp']}"
+        messages.append(final)
         
-        return message
+        return messages
 
 if __name__ == "__main__":
     bot = EmailBot()
