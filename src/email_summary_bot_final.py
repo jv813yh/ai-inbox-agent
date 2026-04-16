@@ -147,6 +147,17 @@ class EmailManager:
 
         return body
 
+    def mark_as_read(self, msg_ids: List[bytes]) -> bool:
+        """Mark emails as read (\\Seen flag)"""
+        try:
+            for msg_id in msg_ids:
+                self.mail.store(msg_id, '+FLAGS', '\\Seen')
+            print(f"✅ Marked {len(msg_ids)} emails as read")
+            return True
+        except Exception as e:
+            print(f"❌ Error marking as read: {e}")
+            return False
+
     def mark_as_important(self, msg_ids: List[bytes]) -> bool:
         """Mark emails as important"""
         try:
@@ -238,70 +249,64 @@ class EmailBot:
         self.telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
     def send_telegram(self, message: str) -> bool:
-        """Send message to Telegram with automatic chunking for long messages"""
+        """Send plain-text message to Telegram, chunking at paragraph boundaries."""
         if not self.telegram_token or not self.telegram_chat_id:
             print("❌ Telegram config missing!")
             return False
 
         url = f"https://api.telegram.org/bot{self.telegram_token}/sendMessage"
+        chunks = self._chunk_message(message)
 
-        # Telegram limit is 4096 characters — split into parts if needed
-        max_length = 4096
-
-        if len(message) <= max_length:
-            payload = {
-                'chat_id': self.telegram_chat_id,
-                'text': message,
-                'parse_mode': 'HTML'
-            }
-
+        for i, chunk in enumerate(chunks, 1):
+            payload = {'chat_id': self.telegram_chat_id, 'text': chunk, 'parse_mode': 'HTML'}
             try:
                 response = requests.post(url, json=payload, timeout=10)
                 if response.status_code == 200:
-                    print("✅ Telegram message sent")
-                    return True
+                    print(f"✅ Telegram chunk {i}/{len(chunks)} sent")
                 else:
-                    print(f"❌ Telegram error: {response.text}")
+                    print(f"❌ Telegram error (chunk {i}): {response.text}")
                     return False
             except Exception as e:
-                print(f"❌ Telegram exception: {e}")
+                print(f"❌ Telegram exception (chunk {i}): {e}")
                 return False
-        else:
-            # Long message — split into chunks by line
-            parts = []
-            current_part = ""
 
-            lines = message.split('\n')
-            for line in lines:
-                if len(current_part) + len(line) + 1 > max_length:
-                    if current_part:
-                        parts.append(current_part)
-                    current_part = line
+        return True
+
+    @staticmethod
+    def _chunk_message(text: str, max_length: int = 4000) -> list:
+        """Split text into chunks that respect paragraph boundaries."""
+        if len(text) <= max_length:
+            return [text]
+
+        chunks = []
+        # Split on blank lines (paragraph boundaries) first
+        paragraphs = text.split('\n\n')
+        current = ""
+
+        for para in paragraphs:
+            candidate = (current + "\n\n" + para).strip() if current else para
+            if len(candidate) <= max_length:
+                current = candidate
+            else:
+                if current:
+                    chunks.append(current)
+                # Single paragraph larger than limit — split by line
+                if len(para) > max_length:
+                    for line in para.split('\n'):
+                        candidate = (current + "\n" + line).strip() if current else line
+                        if len(candidate) <= max_length:
+                            current = candidate
+                        else:
+                            if current:
+                                chunks.append(current)
+                            current = line
                 else:
-                    current_part += '\n' + line if current_part else line
+                    current = para
 
-            if current_part:
-                parts.append(current_part)
+        if current:
+            chunks.append(current)
 
-            # Send all parts
-            for i, part in enumerate(parts):
-                payload = {
-                    'chat_id': self.telegram_chat_id,
-                    'text': part,
-                    'parse_mode': 'HTML'
-                }
-
-                try:
-                    response = requests.post(url, json=payload, timeout=10)
-                    if response.status_code != 200:
-                        print(f"❌ Telegram error on part {i+1}: {response.text}")
-                        return False
-                except Exception as e:
-                    print(f"❌ Telegram exception on part {i+1}: {e}")
-                    return False
-
-            print(f"✅ Sent {len(parts)} Telegram messages")
-            return True
+        return chunks
 
     def run(self):
         """Run the email bot with full content extraction"""
@@ -346,7 +351,7 @@ class EmailBot:
                 yt_urls = YouTubeExtractor.extract_youtube_links(body)
                 if yt_urls:
                     print(f"\n🎥 Found {len(yt_urls)} YouTube video(s)")
-                    yt_data = ContentPreparator.prepare_youtube_batch(yt_urls)
+                    yt_data = ContentPreparator.prepare_youtube_batch(yt_urls, email_body=body)
                     all_content['youtube'].extend(yt_data)
                     found_special = True
 
@@ -364,7 +369,11 @@ class EmailBot:
                     summary = self._summarize_plain_email(email_data)
                     all_content['plain_emails'].append(summary)
 
-            # 5. Save prepared data to JSON
+            # 5. Mark all processed emails as read
+            processed_ids = [e['id'] for e in emails]
+            self.manager.mark_as_read(processed_ids)
+
+            # 7. Save prepared data to JSON
             print("\n\n💾 Saving prepared data...")
             output_file = 'prepared_content.json'
 
@@ -378,11 +387,11 @@ class EmailBot:
             else:
                 print(f"❌ File not created!")
 
-            # 6. Create Telegram messages
+            # 8. Create Telegram messages
             print("\n📤 Creating Telegram messages...")
             telegram_messages = self._create_summary_messages(all_content)
 
-            # 7. Send to Telegram
+            # 9. Send to Telegram
             for i, msg in enumerate(telegram_messages, 1):
                 print(f"\n📤 Sending message {i}/{len(telegram_messages)}...")
                 self.send_telegram(msg)
@@ -425,59 +434,58 @@ class EmailBot:
         }
 
     def _create_summary_messages(self, content: Dict) -> List[str]:
-        """Build Telegram messages with full content (may produce multiple messages)"""
+        """Build HTML-formatted Telegram messages (may produce multiple per item)."""
         messages = []
 
-        def e(text: str) -> str:
-            """Escape special HTML characters in user/AI-generated content."""
-            return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        def esc(text: str) -> str:
+            """Escape HTML special chars in AI/user-generated content."""
+            return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
         # Header
-        header = f"📧 <b>Email Summary</b> - {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-        header += f"✅ Processed {content['emails_processed']} email(s)\n"
+        header = (
+            f"📧 <b>Email Summary</b> — "
+            f"<i>{datetime.now().strftime('%Y-%m-%d %H:%M')}</i>\n"
+            f"✅ Processed <b>{content['emails_processed']}</b> email(s)"
+        )
         messages.append(header)
 
         # YouTube section
         for i, video in enumerate(content.get('youtube', []), 1):
             msg = f"🎥 <b>YouTube Video {i}</b>\n\n"
-            msg += f"<b>{e(video.get('title', 'Unknown'))}</b>\n"
-            msg += f"🔗 {video['url']}\n\n"
-
+            msg += f"<b>{esc(video.get('title', 'Unknown'))}</b>\n"
+            msg += f"🔗 {esc(video['url'])}\n\n"
             notes = video.get('detailed_notes', '')
             if notes:
-                msg += f"📝 <b>Notes:</b>\n{e(notes)}\n"
-
+                msg += f"📝 <b>Notes:</b>\n{esc(notes)}"
             if video.get('has_full_transcript'):
-                msg += "\n✅ Full transcript available in prepared_content.json\n"
-
+                msg += "\n\n✅ <i>Full transcript saved in prepared_content.json</i>"
             messages.append(msg)
 
         # GitHub section
         for i, repo in enumerate(content.get('github', []), 1):
             msg = f"🐙 <b>GitHub Repo {i}</b>\n\n"
-            msg += f"<b>{e(repo['owner'])}/{e(repo['repo'])}</b>\n"
-            msg += f"🔗 {repo['url']}\n"
-            msg += f"⭐ Stars: {repo.get('stars', 0)}\n\n"
-
+            msg += f"<b>{esc(repo['owner'])}/{esc(repo['repo'])}</b>\n"
+            msg += f"🔗 {esc(repo['url'])}\n"
+            msg += f"⭐ Stars: <b>{repo.get('stars', 0)}</b>\n\n"
             summary = repo.get('detailed_summary', '')
             if summary:
-                msg += f"📝 <b>Analysis:</b>\n{e(summary)}\n"
-
+                msg += f"📝 <b>Analysis:</b>\n{esc(summary)}"
             messages.append(msg)
 
         # Plain emails section
         for i, em in enumerate(content.get('plain_emails', []), 1):
             msg = f"📩 <b>Email {i}</b>\n\n"
-            msg += f"<b>{e(em['subject'])}</b>\n"
-            msg += f"From: {e(em['from'])}\n"
-            msg += f"Date: {em['date']}\n\n"
-            msg += f"📝 <b>Summary:</b>\n{e(em['summary'])}\n"
+            msg += f"<b>{esc(em['subject'])}</b>\n"
+            msg += f"<i>From:</i> {esc(em['from'])}\n"
+            msg += f"<i>Date:</i> {esc(em['date'])}\n\n"
+            msg += f"📝 <b>Summary:</b>\n{esc(em['summary'])}"
             messages.append(msg)
 
         # Footer
-        final = f"\n✅ <b>All data saved to prepared_content.json</b>\n"
-        final += f"Timestamp: {content['timestamp']}"
-        messages.append(final)
+        messages.append(
+            f"✅ <b>All data saved to prepared_content.json</b>\n"
+            f"<i>Timestamp: {content['timestamp']}</i>"
+        )
 
         return messages
 

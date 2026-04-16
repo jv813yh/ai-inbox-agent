@@ -240,26 +240,39 @@ class ContentPreparator:
     """Prepare content data for vector database"""
     
     @staticmethod
-    def prepare_youtube_batch(urls: List[str]) -> List[Dict]:
-        """Process multiple YouTube videos"""
+    def prepare_youtube_batch(urls: List[str], email_body: str = "") -> List[Dict]:
+        """Process multiple YouTube videos.
+
+        email_body is used as fallback context when yt-dlp is blocked and no
+        transcript is available — the email itself often contains a description
+        or table of contents for the linked video.
+        """
         results = []
-        
+
         for url in urls:
             print(f"\n🎥 Processing YouTube: {url}")
-            
-            # Get video info
+
+            # Get video info (falls back to stub when yt-dlp is blocked)
             video_info = YouTubeExtractor.get_video_info(url)
             if not video_info:
                 continue
-            
-            # Get transcript
+
+            # Get transcript via youtube-transcript-api
             transcript = YouTubeExtractor.get_transcript(url)
-            
+
+            # If yt-dlp returned only a stub title AND no transcript,
+            # use the email body as description so Claude has real context
+            title = video_info.get('title', '')
+            description = video_info.get('description', '')
+            if not description and not transcript and email_body:
+                print(f"  ℹ️ Using email body as context (yt-dlp blocked, no transcript)")
+                description = email_body[:3000]
+
             # Summarize
             summary = YouTubeExtractor.summarize_video(
                 url,
-                video_info.get('title', ''),
-                video_info.get('description', ''),
+                title,
+                description,
                 transcript
             )
             

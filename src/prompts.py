@@ -15,6 +15,13 @@ Placeholders use Python str.format() syntax:
     GitHub     — {repo}, {owner}, {url}, {description}, {stars}, {forks},
                  {language}, {topics}, {updated_at}, {readme}
     PlainEmail — {subject}, {from_addr}, {body}
+
+IMPORTANT — output format rules for all prompts:
+    - No Markdown (no ##, **, __, ---, backticks, etc.)
+    - Use EMOJI + CAPS for section headers (e.g. "📝 WHAT IS THIS VIDEO?")
+    - Separate sections with a blank line
+    - Use plain bullet points with a dash (- item)
+    - Keep the output readable as plain text in Telegram
 """
 
 # ---------------------------------------------------------------------------
@@ -22,67 +29,66 @@ Placeholders use Python str.format() syntax:
 # ---------------------------------------------------------------------------
 
 YOUTUBE_V1 = """\
-You are an experienced university professor who writes detailed notes for \
-students after watching a video.
+You are an experienced university professor writing detailed lecture notes \
+for students after watching a video.
 
 YouTube Video:
 {context}
 
-Create a DETAILED MARKDOWN document with notes (as if a teacher wrote them \
-for students):
+Write DETAILED PLAIN TEXT notes using this exact structure. \
+Do NOT use Markdown formatting (no #, **, __, ---, backticks). \
+Use the emoji + uppercase label shown for each section header. \
+Separate sections with one blank line.
 
-## 📺 Title
+📺 TITLE
 {title}
 
-## 📝 What Is This Video About?
-A simple explanation in 2-3 sentences of what you will learn. Write it like \
-a textbook.
+📝 WHAT IS THIS VIDEO ABOUT?
+A clear 2-3 sentence textbook-style summary of what you will learn.
 
-## 🎓 Main Learning Objectives
+🎓 MAIN LEARNING OBJECTIVES
 What you will learn from this video:
-- Objective 1: ...
-- Objective 2: ...
-- Objective 3: ...
+- Objective 1
+- Objective 2
+- Objective 3
 
-## 📋 Detailed Video Content (Lecture Notes)
-### Part 1: [Title]
-Detailed explanation of the points from this section
+📋 DETAILED CONTENT (LECTURE NOTES)
+Part 1: [name]
+Thorough explanation of the key points from this part.
 
-### Part 2: [Title]
-Detailed explanation of the points from this section
+Part 2: [name]
+Thorough explanation of the key points from this part.
 
-### Part 3: [Title]
-Detailed explanation of the points from this section
+Part 3: [name]
+Thorough explanation of the key points from this part.
 
-## 🔑 Key Takeaways
-- Important point 1 + explanation
-- Important point 2 + explanation
-- Important point 3 + explanation
+🔑 KEY TAKEAWAYS
+- Important point 1 with explanation
+- Important point 2 with explanation
+- Important point 3 with explanation
 
-## 💡 Analogies and Examples
-Explain the concepts using analogies or examples that a beginner could \
-understand
+💡 ANALOGIES AND EXAMPLES
+Explain the concepts with analogies or examples a beginner would understand.
 
-## 🔗 Connections to Other Concepts
-What does this relate to:
-- Concept 1
-- Concept 2
-- Concept 3
+🔗 CONNECTIONS TO OTHER CONCEPTS
+- Concept 1: how it relates
+- Concept 2: how it relates
+- Concept 3: how it relates
 
-## ❓ Questions to Reflect On
-Questions you should ask yourself after watching the video:
+❓ QUESTIONS TO REFLECT ON
 1. Question 1
 2. Question 2
 3. Question 3
 
-## 🚀 How to Apply This in Practice
-Concrete ways to use this knowledge in a real project
+🚀 HOW TO APPLY THIS IN PRACTICE
+Concrete ways to use this knowledge in a real project. Be specific and complete \
+every point — do not leave sentences unfinished.
 
-## ⭐ Relevance (1-5 stars)
-How relevant is this video for a modern developer and why?
+⭐ RELEVANCE FOR MODERN DEVELOPERS (1-5)
+Rating with explanation.
 
-## 📚 Further Reading
-What should you read/watch to understand this topic more deeply?\
+📚 FURTHER READING
+What to read or watch next to go deeper on this topic.\
 """
 
 # ---------------------------------------------------------------------------
@@ -90,14 +96,14 @@ What should you read/watch to understand this topic more deeply?\
 # ---------------------------------------------------------------------------
 
 GITHUB_V1 = """\
-You are an experienced software engineering professor who explains GitHub \
-projects to students.
+You are an experienced software engineering professor explaining a GitHub \
+project to students.
 
 Project: {repo}
 Owner: {owner}
 URL: {url}
 Description: {description}
-Stars: {stars} ⭐
+Stars: {stars}
 Forks: {forks}
 Language: {language}
 Topics: {topics}
@@ -106,43 +112,45 @@ Last updated: {updated_at}
 README:
 {readme}
 
-Create a DETAILED MARKDOWN breakdown (as if you were explaining it to a \
-student):
+Write a DETAILED PLAIN TEXT breakdown using this exact structure. \
+Do NOT use Markdown formatting (no #, **, __, ---, backticks). \
+Use the emoji + uppercase label shown for each section header. \
+Separate sections with one blank line. \
+Complete every section fully — do not leave any section unfinished.
 
-## 🎓 What Is This Project?
-Explain in 3-4 sentences what the project does, as if teaching in a class. \
-Be clear and easy to understand.
+🎓 WHAT IS THIS PROJECT?
+3-4 clear sentences explaining what the project does, as if teaching in class.
 
-## 💡 Main Ideas and Concepts
-- Key concept 1: Explanation
-- Key concept 2: Explanation
-- Key concept 3: Explanation
+💡 MAIN IDEAS AND CONCEPTS
+- Key concept 1: explanation
+- Key concept 2: explanation
+- Key concept 3: explanation
 
-## 🔧 How Does It Work in Practice?
-A concrete example or analogy of how it works (as if explaining to students)
+🔧 HOW DOES IT WORK IN PRACTICE?
+A concrete example or analogy showing how it works.
 
-## 🚀 How to Implement It as a Developer?
-### Capabilities:
-- Capability 1: How can it be applied?
-- Capability 2: Where will you use it?
-- Capability 3: What does it connect with?
+🚀 HOW TO IMPLEMENT IT AS A DEVELOPER?
+Capabilities:
+- Capability 1: how to apply it
+- Capability 2: where you will use it
+- Capability 3: what it connects with
 
-### Implementation Difficulty: Easy/Medium/Hard
-Explanation
+Implementation difficulty: Easy / Medium / Hard
+Explanation of why.
 
-## 🔗 What Can It Be Combined With?
-- Integration 1: How do they work together?
-- Integration 2: What complements it?
-- Integration 3: What would you combine it with?
+🔗 WHAT CAN IT BE COMBINED WITH?
+- Integration 1: how they work together
+- Integration 2: what complements it
+- Integration 3: what you would combine it with
 
-## 📊 Practical Value (1-5 ⭐)
-What value does it have for a modern developer? Why?
+📊 PRACTICAL VALUE (1-5)
+Rating with explanation of value for a modern developer.
 
-## ✅ Recommendation
-Who is it ideal for? When should you study it?
+✅ RECOMMENDATION
+Who is it ideal for and when should you study it?
 
-## 🎯 Next Steps
-What should you know before getting started?\
+🎯 NEXT STEPS
+What you should know or do before getting started.\
 """
 
 # ---------------------------------------------------------------------------
