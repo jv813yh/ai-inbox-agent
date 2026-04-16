@@ -43,12 +43,23 @@ class YouTubeExtractor:
         match = re.search(r'(?:v=|youtu\.be/|embed/)([A-Za-z0-9_-]{11})', url)
         return match.group(1) if match else None
 
+    class _SilentLogger:
+        """Suppress all yt-dlp output — errors are still raised as exceptions."""
+        def debug(self, _): pass
+        def warning(self, _): pass
+        def error(self, _): pass
+
     @staticmethod
     def get_video_info(url: str) -> Optional[Dict]:
         """Get YouTube video metadata using yt-dlp, with fallback when blocked."""
         print(f"  📥 Fetching video info...")
         try:
-            ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True}
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'skip_download': True,
+                'logger': YouTubeExtractor._SilentLogger(),
+            }
             with YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
             return {
