@@ -5,6 +5,7 @@ With full YouTube transcript extraction
 Prepares data structures for vector database
 """
 
+import os
 import re
 import json
 import requests
@@ -13,7 +14,9 @@ from typing import Dict, List, Optional
 from anthropic import Anthropic
 from yt_dlp import YoutubeDL
 
-client = Anthropic()
+from prompt_builder import PromptBuilder
+
+client = Anthropic(api_key=os.getenv("CLAUDE_API_KEY_GITHUB_EMAIL"))
 
 class YouTubeExtractor:
     """Extract YouTube video info, transcripts and summarize"""
@@ -137,74 +140,7 @@ class YouTubeExtractor:
         try:
             print(f"  🤖 Summarizing with Claude (detailed notes mode)...")
             
-            # Build context from available data
-            context_parts = []
-            if title:
-                context_parts.append(f"Title: {title}")
-            if description:
-                context_parts.append(f"Description: {description[:500]}")
-            if transcript:
-                context_parts.append(f"Transcript (prvých 5000 znakov): {transcript[:5000]}")
-            
-            context = "\n".join(context_parts)
-            
-            prompt = f"""Ty si skúsený učiteľ na vysokej škole, ktorý po videu napíše svojim študentom detailné poznámky.
- 
-YouTube Video:
-{context}
- 
-Vytvor DETAILNÝ MARKDOWN dokument s poznámkami (ako keby učiteľ dal poznámky):
- 
-## 📺 Názov a Kontakt
-{title}
- 
-## 📝 Čo Je Toto Video?
-Jednoduché vysvetlenie v 2-3 vetách čo sa v videu dozviete. Napíš to ako v učebnici.
- 
-## 🎓 Hlavné Učebné Ciele
-Čo sa naučíš v tomto videu:
-- Cieľ 1: ...
-- Cieľ 2: ...
-- Cieľ 3: ...
- 
-## 📋 Detailný Obsah Video (Poznámky z Prednášky)
-### Časť 1: [Názov]
-Podrobne vysvetlené body z tejto časti
- 
-### Časť 2: [Názov]
-Podrobne vysvetlené body z tejto časti
- 
-### Časť 3: [Názov]
-Podrobne vysvetlené body z tejto časti
- 
-## 🔑 Kľúčové Takže-ty (Key Takeaways)
-- Dôležitý bod 1 + vysvetlenie
-- Dôležitý bod 2 + vysvetlenie
-- Dôležitý bod 3 + vysvetlenie
- 
-## 💡 Analógie a Príklady
-Vysvetli koncepty pomocou analógií alebo príkladov, ako by to pochopil aj začiatočník
- 
-## 🔗 Prepojenia s Inými Pojmami
-Čo to má spoločné s:
-- Koncept 1
-- Koncept 2
-- Koncept 3
- 
-## ❓ Otázky na Zamyslenie
-Otázky, ktoré by si mal položiť sám sebe po videu:
-1. Otázka 1
-2. Otázka 2
-3. Otázka 3
- 
-## 🚀 Ako To Aplikovať v Prakticke
-Konkrétne spôsoby ako použiť tieto poznatky v reálnom projekte
- 
-## ⭐ Relevancia (1-5 hviezd)
-Ako relevantné je toto video pre moderného developera a prečo?
- 
-## 📚 Ďalšie Čítanie
-Čo by si mal prečítať/pozrieť, aby si hlbšie pochopil túto tému?"""
+            prompt = PromptBuilder.youtube(title, description, transcript)
             
             response = client.messages.create(
                 model="claude-opus-4-6",
@@ -307,56 +243,7 @@ class GitHubExtractor:
         try:
             print(f"  🤖 Analyzing repo (detailed mode)...")
             
-            prompt = f"""Ty si skúsený učiteľ softwarového inžinierstva, ktorý vysvetľuje študentom projekty z GitHubu.
-
-Projekt: {repo_info['repo']}
-Owner: {repo_info['owner']}
-URL: {repo_info['url']}
-Popis: {repo_info.get('description', 'Bez popisu')}
-Stars: {repo_info.get('stars', 0)} ⭐
-Forks: {repo_info.get('forks', 0)}
-Jazyk: {repo_info.get('language', 'Unknown')}
-Topics: {', '.join(repo_info.get('topics', []))}
-Posledná aktualizácia: {repo_info.get('updated_at', 'Unknown')}
-
-README:
-{repo_info.get('readme', 'Neni dostupny')[:3000]}
-
-Vytvor DETAILNÝ MARKDOWN výklad (ako by si to vysvetľoval študentovi):
-
-## 🎓 O Čom Je Tento Projekt?
-Vysvetli v 3-4 vetách čo projekt robí, ako keby si vysvetľoval v triede. Buď jasný a zrozumiteľný.
-
-## 💡 Hlavné Myšlienky a Koncepty
-- Kľúčový koncept 1: Vysvetlenie
-- Kľúčový koncept 2: Vysvetlenie
-- Kľúčový koncept 3: Vysvetlenie
-
-## 🔧 Ako To Fungujem v Praxi?
-Konkrétny príklad alebo analógia ako funguje (ako keby si to vysvetľoval študentom)
-
-## 🚀 Ako Ich Implementovať ako Developer?
-### Schopnosti:
-- Schopnosť 1: Ako sa to dá aplikovať?
-- Schopnosť 2: Kde to budeš používať?
-- Schopnosť 3: S čím sa to spája?
-
-### Ťažkosť Implementácie: Easy/Medium/Hard
-Vysvetlenie
-
-## 🔗 S Čím Sa To Dá Prepojiť?
-- Prepojenie 1: Ako spolu pracujú?
-- Prepojenie 2: Čo sa dopĺňa?
-- Prepojenie 3: Čo by si skombinoval?
-
-## 📊 Praktická Hodnota (1-5 ⭐)
-Akú hodnotu má pre moderného developera? Prečo?
-
-## ✅ Odporúčanie
-Pre koho je to ideálne? Kedy by si ho mal študovať?
-
-## 🎯 Ďalšie Kroky
-Čo by si mal vedieť predtým, ako s tým začneš?"""
+            prompt = PromptBuilder.github(repo_info)
             
             response = client.messages.create(
                 model="claude-opus-4-6",
