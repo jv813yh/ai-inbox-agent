@@ -8,15 +8,20 @@ import json
 import imaplib
 import email
 from email.header import decode_header
-import re
 from anthropic import Anthropic
 import requests
 from datetime import datetime
 from typing import List, Dict
 import sys
 
-from extractors import YouTubeExtractor, GitHubExtractor, ContentPreparator
+# Pridaj src do path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+try:
+    from extractors import YouTubeExtractor, GitHubExtractor, ContentPreparator
+except ImportError:
+    print("❌ Error: extractors.py not found in src/")
+    sys.exit(1)
 
 # Anthropic client
 client = Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
@@ -95,7 +100,7 @@ class EmailManager:
     
     def parse_email(self, msg_id: bytes) -> Dict:
         """Parse email obsah"""
-        status, msg_data = self.mail.fetch(msg_id, "(BODY.PEEK[])")
+        status, msg_data = self.mail.fetch(msg_id, "(RFC822)")
         if status != "OK":
             return None
         
@@ -141,17 +146,6 @@ class EmailManager:
         
         return body
     
-    def mark_as_read(self, msg_ids: List[bytes]) -> bool:
-        """Mark emails as read (SEEN) after successful processing"""
-        try:
-            for msg_id in msg_ids:
-                self.mail.store(msg_id, '+FLAGS', '\\Seen')
-            print(f"✅ Marked {len(msg_ids)} emails as read")
-            return True
-        except Exception as e:
-            print(f"❌ Error marking as read: {e}")
-            return False
-
     def mark_as_important(self, msg_ids: List[bytes]) -> bool:
         """Označ emaily ako důležité"""
         try:
@@ -240,93 +234,30 @@ class EmailBot:
         self.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
         self.telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
     
-    def _safe_html(self, text: str) -> str:
-        """Convert to Telegram-safe HTML properly"""
-        # Step 1: Escape all HTML special chars
-        text = text.replace('&', '&amp;')
-        text = text.replace('<', '&lt;')
-        text = text.replace('>', '&gt;')
-        
-        # Step 2: Convert markdown to HTML tags
-        # Headers ## Title → <b>Title</b>
-        text = re.sub(r'^#{1,3}\s+(.+)$', r'<b>\1</b>', text, flags=re.MULTILINE)
-        
-        # **bold** → <b>bold</b>
-        text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
-        
-        # *italic* → <i>italic</i> (but not bullet points)
-        text = re.sub(r'(?<!\w)\*(?!\s)(.+?)(?<!\s)\*(?!\w)', r'<i>\1</i>', text)
-        
-        # `code` → <code>code</code>
-        text = re.sub(r'`(.+?)`', r'<code>\1</code>', text)
-        
-        # --- horizontal rules → just a line
-        text = re.sub(r'^-{3,}$', '───────────────', text, flags=re.MULTILINE)
-        
-        return text
-    
-    def _strip_html(self, text: str) -> str:
-        """Remove HTML tags for plain text fallback"""
-        text = text.replace('<b>', '').replace('</b>', '')
-        text = text.replace('<i>', '').replace('</i>', '')
-        text = text.replace('<code>', '').replace('</code>', '')
-        text = text.replace('&amp;', '&')
-        text = text.replace('&lt;', '<')
-        text = text.replace('&gt;', '>')
-        return text
-    
     def send_telegram(self, message: str) -> bool:
-        """Send message to Telegram with HTML formatting, chunking, and plain text fallback"""
+        """Pošli správu do Telegramu"""
         if not self.telegram_token or not self.telegram_chat_id:
             print("❌ Telegram config missing!")
             return False
         
         url = f"https://api.telegram.org/bot{self.telegram_token}/sendMessage"
-        html_message = self._safe_html(message)
+        payload = {
+            'chat_id': self.telegram_chat_id,
+            'text': message,
+            'parse_mode': 'Markdown'
+        }
         
-        # Split long messages (Telegram limit is 4096 chars)
-        max_len = 4000
-        chunks = []
-        while len(html_message) > max_len:
-            split_at = html_message.rfind('\n', 0, max_len)
-            if split_at == -1:
-                split_at = max_len
-            chunks.append(html_message[:split_at])
-            html_message = html_message[split_at:].lstrip('\n')
-        chunks.append(html_message)
-        
-        success = True
-        for i, chunk in enumerate(chunks):
-            payload = {
-                'chat_id': self.telegram_chat_id,
-                'text': chunk,
-                'parse_mode': 'HTML',
-            }
-            
-            try:
-                resp = requests.post(url, json=payload, timeout=30)
-                if resp.status_code == 200:
-                    print(f"  ✅ Chunk {i+1}/{len(chunks)} sent")
-                else:
-                    # Fallback: send as plain text
-                    print(f"  ⚠️ HTML failed ({resp.status_code}), sending plain text...")
-                    payload_plain = {
-                        'chat_id': self.telegram_chat_id,
-                        'text': self._strip_html(chunk),
-                    }
-                    resp2 = requests.post(url, json=payload_plain, timeout=30)
-                    if resp2.status_code == 200:
-                        print(f"  ✅ Chunk {i+1}/{len(chunks)} sent (plain)")
-                    else:
-                        print(f"  ❌ Chunk {i+1} failed: {resp2.text}")
-                        success = False
-            except Exception as e:
-                print(f"  ❌ Error sending chunk {i+1}: {e}")
-                success = False
-        
-        if success:
-            print("✅ Telegram message sent")
-        return success
+        try:
+            response = requests.post(url, json=payload, timeout=10)
+            if response.status_code == 200:
+                print("✅ Telegram message sent")
+                return True
+            else:
+                print(f"❌ Telegram error: {response.text}")
+                return False
+        except Exception as e:
+            print(f"❌ Telegram exception: {e}")
+            return False
     
     def run(self):
         """Spusti email bot s úplným content extracting"""
@@ -392,10 +323,6 @@ class EmailBot:
             print("\n📤 Sending to Telegram...")
             self.send_telegram(telegram_message)
             
-            # 8. Mark emails as read only after successful processing
-            processed_ids = [e['id'] for e in emails]
-            self.manager.mark_as_read(processed_ids)
-            
             print("\n✅ Done!")
             
         except Exception as e:
@@ -407,31 +334,45 @@ class EmailBot:
             self.manager.disconnect()
     
     def _create_summary_message(self, content: Dict) -> str:
-        """Vytvor sumarizovanú Telegram správu"""
+        """Vytvor sumarizovanú Telegram správu s detailnými sumármi"""
         message = f"📧 **Email Summary** - {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
         
         # YouTube section
         if content['youtube']:
-            message += "🎥 **YouTube Videos:**\n\n"
+            message += "🎥 **YouTube Videos - Podrobné Poznámky:**\n\n"
             for i, video in enumerate(content['youtube'], 1):
                 message += f"**{i}. {video.get('title', 'Unknown')}**\n"
                 message += f"🔗 {video['url']}\n"
-                message += f"📝 {video.get('summary', '')[:300]}...\n"
+                
+                # Show detailed notes (first 500 chars)
+                notes = video.get('detailed_notes', '')
+                if notes:
+                    message += f"\n📝 {notes[:600]}...\n"
+                
                 if video.get('has_full_transcript'):
-                    message += "✅ Full transcript available\n"
-                message += "\n"
+                    message += "✅ Úplný prepis dostupný\n"
+                
+                message += "\n---\n\n"
         
         # GitHub section
         if content['github']:
-            message += "🐙 **GitHub Repos:**\n\n"
+            message += "🐙 **GitHub Repos - Detailná Analýza:**\n\n"
             for i, repo in enumerate(content['github'], 1):
                 message += f"**{i}. {repo['owner']}/{repo['repo']}**\n"
                 message += f"🔗 {repo['url']}\n"
                 message += f"⭐ Stars: {repo.get('stars', 0)}\n"
-                message += f"📝 {repo.get('summary', '')[:300]}...\n\n"
+                
+                # Show detailed summary (first 500 chars)
+                summary = repo.get('detailed_summary', '')
+                if summary:
+                    message += f"\n📝 {summary[:600]}...\n"
+                else:
+                    message += f"📝 {repo.get('summary', '')[:600]}...\n"
+                
+                message += "\n---\n\n"
         
-        message += f"\n---\n*Processed {content['emails_processed']} email(s)*\n"
-        message += "*Full data saved to prepared_content.json*"
+        message += f"\n✅ Spracované {content['emails_processed']} email(ov)\n"
+        message += "*Podrobné dáta uložené v prepared_content.json*"
         
         return message
 

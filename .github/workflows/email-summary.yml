@@ -32,15 +32,10 @@ jobs:
         working-directory: src
         run: python email_summary_bot_apppassword.py
         
-      - name: Save data to repo
+      - name: Upload prepared content
         if: always()
-        run: |
-          mkdir -p data
-          if [ -f prepared_content.json ]; then
-            cp prepared_content.json data/prepared_content_$(date +%Y%m%d_%H%M%S).json
-            cp prepared_content.json data/latest.json
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add data/
-            git commit -m "📧 Auto-save email data $(date +%Y-%m-%d)" || echo "No changes"
-            git push
+        uses: actions/upload-artifact@v3
+        with:
+          name: prepared-content
+          path: prepared_content.json
+          retention-days: 30

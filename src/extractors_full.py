@@ -7,26 +7,13 @@ Prepares data structures for vector database
 
 import re
 import json
-import os
 import requests
 from datetime import datetime
 from typing import Dict, List, Optional
 from anthropic import Anthropic
+from yt_dlp import YoutubeDL
 
-# yt-dlp is optional — YouTube oEmbed + youtube-transcript-api are preferred
-try:
-    from yt_dlp import YoutubeDL
-    HAS_YT_DLP = True
-except ImportError:
-    HAS_YT_DLP = False
-
-try:
-    from youtube_transcript_api import YouTubeTranscriptApi
-    HAS_TRANSCRIPT_API = True
-except ImportError:
-    HAS_TRANSCRIPT_API = False
-
-client = Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
+client = Anthropic()
 
 class YouTubeExtractor:
     """Extract YouTube video info, transcripts and summarize"""
@@ -47,162 +34,108 @@ class YouTubeExtractor:
         return list(set(links))  # Remove duplicates
     
     @staticmethod
-    def _extract_video_id(url: str) -> Optional[str]:
-        """Extract video ID from any YouTube URL format"""
-        patterns = [
-            r'(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})',
-            r'embed/([a-zA-Z0-9_-]{11})',
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, url)
-            if match:
-                return match.group(1)
-        return None
-
-    @staticmethod
     def get_video_info(url: str) -> Optional[Dict]:
-        """Get YouTube video metadata — oEmbed first, yt-dlp fallback"""
+        """Get YouTube video metadata using yt-dlp"""
         try:
             print(f"  📥 Fetching video info...")
-            video_id = YouTubeExtractor._extract_video_id(url)
-
-            # --- Strategy 1: YouTube oEmbed (no auth needed) ---
-            oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
-            resp = requests.get(oembed_url, timeout=10)
-            if resp.status_code == 200:
-                data = resp.json()
-                print(f"  ✅ Got info via oEmbed: {data.get('title', '?')}")
-                return {
-                    'video_id': video_id or '',
-                    'url': url,
-                    'title': data.get('title', 'Unknown'),
-                    'description': '',          # oEmbed doesn't return description
-                    'channel': data.get('author_name', 'Unknown'),
-                    'duration': 0,
-                    'upload_date': '',
-                    'view_count': 0,
-                    'thumbnail': f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg" if video_id else '',
-                }
-
-            # --- Strategy 2: yt-dlp (needs cookies/auth) ---
-            if HAS_YT_DLP:
-                print(f"  ⚠️ oEmbed failed, trying yt-dlp...")
-                ydl_opts = {
-                    'quiet': True,
-                    'no_warnings': True,
-                    'skip_download': True,
-                }
-                with YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                return {
-                    'video_id': info.get('id', ''),
-                    'url': url,
-                    'title': info.get('title', 'Unknown'),
-                    'description': info.get('description', ''),
-                    'channel': info.get('uploader', 'Unknown'),
-                    'duration': info.get('duration', 0),
-                    'upload_date': info.get('upload_date', ''),
-                    'view_count': info.get('view_count', 0),
-                    'thumbnail': info.get('thumbnail', ''),
-                }
-
-            print(f"  ❌ All strategies failed for video info")
-            return None
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'skip_download': True,
+            }
+            
+            with YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+            
+            return {
+                'video_id': info.get('id', ''),
+                'url': url,
+                'title': info.get('title', 'Unknown'),
+                'description': info.get('description', ''),
+                'channel': info.get('uploader', 'Unknown'),
+                'duration': info.get('duration', 0),
+                'upload_date': info.get('upload_date', ''),
+                'view_count': info.get('view_count', 0),
+                'thumbnail': info.get('thumbnail', '')
+            }
         except Exception as e:
             print(f"  ❌ Error getting video info: {e}")
-            # Return minimal info so the pipeline doesn't skip the video entirely
-            video_id = YouTubeExtractor._extract_video_id(url)
-            if video_id:
-                return {
-                    'video_id': video_id,
-                    'url': url,
-                    'title': f'YouTube video {video_id}',
-                    'description': '',
-                    'channel': 'Unknown',
-                    'duration': 0,
-                    'upload_date': '',
-                    'view_count': 0,
-                    'thumbnail': f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg",
-                }
             return None
     
     @staticmethod
     def get_transcript(url: str) -> Optional[str]:
-        """Get full transcript — youtube-transcript-api first, yt-dlp fallback"""
-        video_id = YouTubeExtractor._extract_video_id(url)
-
-        # --- Strategy 1: youtube-transcript-api (lightweight, no auth) ---
-        if HAS_TRANSCRIPT_API and video_id:
-            try:
-                print(f"  📝 Extracting transcript (transcript-api)...")
-                ytt = YouTubeTranscriptApi()
-                fetched = ytt.fetch(video_id, languages=['en', 'sk', 'cs', 'de'])
-                transcript = ' '.join(snippet.text for snippet in fetched)
-                print(f"  ✅ Got transcript ({len(transcript)} chars)")
-                return transcript[:10000]
-            except Exception as e:
-                print(f"  ⚠️ transcript-api failed: {e}")
-
-        # --- Strategy 2: yt-dlp subtitles ---
-        if HAS_YT_DLP:
-            try:
-                print(f"  📝 Trying yt-dlp for transcript...")
-                ydl_opts = {
-                    'quiet': True,
-                    'no_warnings': True,
-                    'skip_download': True,
-                    'writesubtitles': True,
-                    'writeautomaticsub': True,
-                    'subtitlesformat': 'vtt',
-                }
-                with YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=False)
-
-                if not info.get('subtitles') and not info.get('automatic_captions'):
-                    print(f"  ⚠️ No transcript available via yt-dlp")
-                    return None
-
-                subtitles = info.get('subtitles', {}) or info.get('automatic_captions', {})
-                transcript_text = ""
-
-                if 'en' in subtitles:
-                    for sub in subtitles['en']:
+        """Get full transcript from YouTube"""
+        try:
+            print(f"  📝 Extracting transcript...")
+            
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'skip_download': True,
+                'writesubtitles': True,
+                'writeautomaticsub': True,
+                'subtitlesformat': 'vtt',
+            }
+            
+            with YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+            
+            # Check if subtitles are available
+            if not info.get('subtitles') and not info.get('automatic_captions'):
+                print(f"  ⚠️ No transcript available for this video")
+                return None
+            
+            # Get English subtitles first, then any available
+            subtitles = info.get('subtitles', {}) or info.get('automatic_captions', {})
+            
+            transcript_text = ""
+            
+            # Try English first
+            if 'en' in subtitles:
+                for sub in subtitles['en']:
+                    if sub.get('data'):
+                        transcript_text = sub['data']
+                        break
+            
+            # If no English, try any language
+            if not transcript_text:
+                for lang, subs in subtitles.items():
+                    for sub in subs:
                         if sub.get('data'):
                             transcript_text = sub['data']
                             break
-
-                if not transcript_text:
-                    for lang, subs in subtitles.items():
-                        for sub in subs:
-                            if sub.get('data'):
-                                transcript_text = sub['data']
-                                break
-                        if transcript_text:
-                            break
-
-                if transcript_text:
-                    lines = transcript_text.split('\n')
-                    clean_lines = []
-                    for line in lines:
-                        if line.startswith('WEBVTT') or line.startswith('NOTE') or '-->' in line or not line.strip():
-                            continue
-                        if line.isdigit():
-                            continue
-                        clean_lines.append(line.strip())
-                    transcript = ' '.join(clean_lines)
-                    print(f"  ✅ Got transcript via yt-dlp ({len(transcript)} chars)")
-                    return transcript[:10000]
-            except Exception as e:
-                print(f"  ⚠️ yt-dlp transcript failed: {e}")
-
-        print(f"  ⚠️ No transcript available for this video")
-        return None
+                    if transcript_text:
+                        break
+            
+            # Parse VTT format (remove timestamps)
+            if transcript_text:
+                # Remove VTT headers and timestamps
+                lines = transcript_text.split('\n')
+                clean_lines = []
+                for line in lines:
+                    # Skip VTT headers and empty lines
+                    if line.startswith('WEBVTT') or line.startswith('NOTE') or '-->' in line or not line.strip():
+                        continue
+                    # Skip cue identifiers (numbers)
+                    if line.isdigit():
+                        continue
+                    clean_lines.append(line.strip())
+                
+                transcript = ' '.join(clean_lines)
+                print(f"  ✅ Got transcript ({len(transcript)} chars)")
+                return transcript[:10000]  # Limit to 10K chars for API
+            
+            return None
+            
+        except Exception as e:
+            print(f"  ⚠️ Error getting transcript: {e}")
+            return None
     
     @staticmethod
     def summarize_video(url: str, title: str = "", description: str = "", transcript: str = "") -> Optional[Dict]:
-        """Summarize YouTube video using Claude"""
+        """Summarize YouTube video using Claude - Teacher Notes Version"""
         try:
-            print(f"  🤖 Summarizing with Claude...")
+            print(f"  🤖 Summarizing with Claude (detailed notes mode)...")
             
             # Build context from available data
             context_parts = []
@@ -211,38 +144,71 @@ class YouTubeExtractor:
             if description:
                 context_parts.append(f"Description: {description[:500]}")
             if transcript:
-                context_parts.append(f"Transcript (first 3000 chars): {transcript[:3000]}")
+                context_parts.append(f"Transcript (prvých 5000 znakov): {transcript[:5000]}")
             
             context = "\n".join(context_parts)
             
-            prompt = f"""Ty si expert na sumarizáciu videí.
-
+            prompt = f"""Ty si skúsený učiteľ na vysokej škole, ktorý po videu napíše svojim študentom detailné poznámky.
+ 
 YouTube Video:
 {context}
-
-Vytvor detailný MARKDOWN report:
-
-## 📋 Súhrn
-3-5 viet o čom je video
-
-## 🎯 Kľúčové Poznatky
-- Bod 1
-- Bod 2
-- Bod 3
-- (max 5 bodov)
-
-## 🏷️ Kategórie
-Vyber relevantné: #AI #Trading #Business #Code #Data #Security #Web #DevOps #Personal #Finance #atď.
-
-## ⭐ Relevancia
-Ohodnoť 1-5 hviezd pre AI/Tech komunitu
-
-## 🔗 Odporúčanie
-Jednoducho: "Sledovať" alebo "Preskočiť" + dôvod"""
+ 
+Vytvor DETAILNÝ MARKDOWN dokument s poznámkami (ako keby učiteľ dal poznámky):
+ 
+## 📺 Názov a Kontakt
+{title}
+ 
+## 📝 Čo Je Toto Video?
+Jednoduché vysvetlenie v 2-3 vetách čo sa v videu dozviete. Napíš to ako v učebnici.
+ 
+## 🎓 Hlavné Učebné Ciele
+Čo sa naučíš v tomto videu:
+- Cieľ 1: ...
+- Cieľ 2: ...
+- Cieľ 3: ...
+ 
+## 📋 Detailný Obsah Video (Poznámky z Prednášky)
+### Časť 1: [Názov]
+Podrobne vysvetlené body z tejto časti
+ 
+### Časť 2: [Názov]
+Podrobne vysvetlené body z tejto časti
+ 
+### Časť 3: [Názov]
+Podrobne vysvetlené body z tejto časti
+ 
+## 🔑 Kľúčové Takže-ty (Key Takeaways)
+- Dôležitý bod 1 + vysvetlenie
+- Dôležitý bod 2 + vysvetlenie
+- Dôležitý bod 3 + vysvetlenie
+ 
+## 💡 Analógie a Príklady
+Vysvetli koncepty pomocou analógií alebo príkladov, ako by to pochopil aj začiatočník
+ 
+## 🔗 Prepojenia s Inými Pojmami
+Čo to má spoločné s:
+- Koncept 1
+- Koncept 2
+- Koncept 3
+ 
+## ❓ Otázky na Zamyslenie
+Otázky, ktoré by si mal položiť sám sebe po videu:
+1. Otázka 1
+2. Otázka 2
+3. Otázka 3
+ 
+## 🚀 Ako To Aplikovať v Prakticke
+Konkrétne spôsoby ako použiť tieto poznatky v reálnom projekte
+ 
+## ⭐ Relevancia (1-5 hviezd)
+Ako relevantné je toto video pre moderného developera a prečo?
+ 
+## 📚 Ďalšie Čítanie
+Čo by si mal prečítať/pozrieť, aby si hlbšie pochopil túto tému?"""
             
             response = client.messages.create(
                 model="claude-opus-4-6",
-                max_tokens=1200,
+                max_tokens=2500,
                 messages=[{"role": "user", "content": prompt}]
             )
             
@@ -253,9 +219,9 @@ Jednoducho: "Sledovať" alebo "Preskočiť" + dôvod"""
                 'url': url,
                 'title': title,
                 'description': description[:500] if description else '',
-                'transcript_preview': transcript[:1000] if transcript else '',
+                'transcript_preview': transcript[:1500] if transcript else '',
                 'has_full_transcript': bool(transcript),
-                'summary': summary_text,
+                'detailed_notes': summary_text,
                 'processed_at': datetime.now().isoformat(),
                 'source': 'email'
             }
@@ -337,11 +303,11 @@ class GitHubExtractor:
     
     @staticmethod
     def summarize_repo(repo_info: Dict) -> Optional[Dict]:
-        """Summarize GitHub repo using Claude"""
+        """Summarize GitHub repo using Claude - Detailed Teacher Version"""
         try:
-            print(f"  🤖 Analyzing repo...")
+            print(f"  🤖 Analyzing repo (detailed mode)...")
             
-            prompt = f"""Ty si expert na vyhodnocovanie GitHub projektov.
+            prompt = f"""Ty si skúsený učiteľ softwarového inžinierstva, ktorý vysvetľuje študentom projekty z GitHubu.
 
 Projekt: {repo_info['repo']}
 Owner: {repo_info['owner']}
@@ -353,32 +319,48 @@ Jazyk: {repo_info.get('language', 'Unknown')}
 Topics: {', '.join(repo_info.get('topics', []))}
 Posledná aktualizácia: {repo_info.get('updated_at', 'Unknown')}
 
-README (prvých 2000 chars):
-{repo_info.get('readme', 'Neni dostupny')[:2000]}
+README:
+{repo_info.get('readme', 'Neni dostupny')[:3000]}
 
-Vytvor MARKDOWN report:
+Vytvor DETAILNÝ MARKDOWN výklad (ako by si to vysvetľoval študentovi):
 
-## 📝 O Projekte
-Čo projekt robí (1-2 vety)
+## 🎓 O Čom Je Tento Projekt?
+Vysvetli v 3-4 vetách čo projekt robí, ako keby si vysvetľoval v triede. Buď jasný a zrozumiteľný.
 
-## 🎯 Použitie
-Na čo sa hodí a prečo by mal byť zaujímavý
+## 💡 Hlavné Myšlienky a Koncepty
+- Kľúčový koncept 1: Vysvetlenie
+- Kľúčový koncept 2: Vysvetlenie
+- Kľúčový koncept 3: Vysvetlenie
 
-## 💻 Technológie
-Aké technológie používa
+## 🔧 Ako To Fungujem v Praxi?
+Konkrétny príklad alebo analógia ako funguje (ako keby si to vysvetľoval študentom)
 
-## ⭐ Kvalita
-1-5 hviezd - ako je projekt spravovaný a ako je populárny
+## 🚀 Ako Ich Implementovať ako Developer?
+### Schopnosti:
+- Schopnosť 1: Ako sa to dá aplikovať?
+- Schopnosť 2: Kde to budeš používať?
+- Schopnosť 3: S čím sa to spája?
 
-## 🏷️ Kategórie
-Vyber relevantné tagy: #AI #Trading #Backend #Frontend #Data #ML #DevTools #atď.
+### Ťažkosť Implementácie: Easy/Medium/Hard
+Vysvetlenie
+
+## 🔗 S Čím Sa To Dá Prepojiť?
+- Prepojenie 1: Ako spolu pracujú?
+- Prepojenie 2: Čo sa dopĺňa?
+- Prepojenie 3: Čo by si skombinoval?
+
+## 📊 Praktická Hodnota (1-5 ⭐)
+Akú hodnotu má pre moderného developera? Prečo?
 
 ## ✅ Odporúčanie
-"Sledovať" alebo "Preskočiť" + krátky dôvod"""
+Pre koho je to ideálne? Kedy by si ho mal študovať?
+
+## 🎯 Ďalšie Kroky
+Čo by si mal vedieť predtým, ako s tým začneš?"""
             
             response = client.messages.create(
                 model="claude-opus-4-6",
-                max_tokens=1000,
+                max_tokens=2000,
                 messages=[{"role": "user", "content": prompt}]
             )
             
@@ -394,7 +376,7 @@ Vyber relevantné tagy: #AI #Trading #Backend #Frontend #Data #ML #DevTools #at�
                 'forks': repo_info.get('forks', 0),
                 'language': repo_info.get('language', 'Unknown'),
                 'topics': repo_info.get('topics', []),
-                'summary': summary_text,
+                'detailed_summary': summary_text,
                 'readme_preview': repo_info.get('readme', '')[:500],
                 'processed_at': datetime.now().isoformat(),
                 'source': 'email'
