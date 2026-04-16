@@ -18,7 +18,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 try:
-    from extractors import YouTubeExtractor, GitHubExtractor, ContentPreparator
+    from extractors_full import YouTubeExtractor, GitHubExtractor, ContentPreparator
 except ImportError:
     print("❌ Error: extractors.py not found in src/")
     sys.exit(1)
