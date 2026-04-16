@@ -101,7 +101,7 @@ class EmailManager:
 
     def parse_email(self, msg_id: bytes) -> Dict:
         """Parse email content"""
-        status, msg_data = self.mail.fetch(msg_id, "(RFC822)")
+        status, msg_data = self.mail.fetch(msg_id, "(BODY.PEEK[])")
         if status != "OK":
             return None
 
@@ -252,7 +252,7 @@ class EmailBot:
             payload = {
                 'chat_id': self.telegram_chat_id,
                 'text': message,
-                'parse_mode': 'Markdown'
+                'parse_mode': 'HTML'
             }
 
             try:
@@ -288,7 +288,7 @@ class EmailBot:
                 payload = {
                     'chat_id': self.telegram_chat_id,
                     'text': part,
-                    'parse_mode': 'Markdown'
+                    'parse_mode': 'HTML'
                 }
 
                 try:
@@ -428,53 +428,54 @@ class EmailBot:
         """Build Telegram messages with full content (may produce multiple messages)"""
         messages = []
 
+        def e(text: str) -> str:
+            """Escape special HTML characters in user/AI-generated content."""
+            return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
         # Header
-        header = f"📧 **Email Summary** - {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-        header += f"✅ Processed {content['emails_processed']} email(s)\n\n"
+        header = f"📧 <b>Email Summary</b> - {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+        header += f"✅ Processed {content['emails_processed']} email(s)\n"
         messages.append(header)
 
         # YouTube section
-        if content['youtube']:
-            for i, video in enumerate(content['youtube'], 1):
-                msg = f"🎥 **YouTube Video {i}**\n\n"
-                msg += f"**{video.get('title', 'Unknown')}**\n"
-                msg += f"🔗 {video['url']}\n\n"
+        for i, video in enumerate(content.get('youtube', []), 1):
+            msg = f"🎥 <b>YouTube Video {i}</b>\n\n"
+            msg += f"<b>{e(video.get('title', 'Unknown'))}</b>\n"
+            msg += f"🔗 {video['url']}\n\n"
 
-                notes = video.get('detailed_notes', '')
-                if notes:
-                    msg += f"📝 **Notes:**\n{notes}\n"
+            notes = video.get('detailed_notes', '')
+            if notes:
+                msg += f"📝 <b>Notes:</b>\n{e(notes)}\n"
 
-                if video.get('has_full_transcript'):
-                    msg += "\n✅ Full transcript available in prepared_content.json\n"
+            if video.get('has_full_transcript'):
+                msg += "\n✅ Full transcript available in prepared_content.json\n"
 
-                messages.append(msg)
+            messages.append(msg)
 
         # GitHub section
-        if content['github']:
-            for i, repo in enumerate(content['github'], 1):
-                msg = f"🐙 **GitHub Repo {i}**\n\n"
-                msg += f"**{repo['owner']}/{repo['repo']}**\n"
-                msg += f"🔗 {repo['url']}\n"
-                msg += f"⭐ Stars: {repo.get('stars', 0)}\n\n"
+        for i, repo in enumerate(content.get('github', []), 1):
+            msg = f"🐙 <b>GitHub Repo {i}</b>\n\n"
+            msg += f"<b>{e(repo['owner'])}/{e(repo['repo'])}</b>\n"
+            msg += f"🔗 {repo['url']}\n"
+            msg += f"⭐ Stars: {repo.get('stars', 0)}\n\n"
 
-                summary = repo.get('detailed_summary', '')
-                if summary:
-                    msg += f"📝 **Analysis:**\n{summary}\n"
+            summary = repo.get('detailed_summary', '')
+            if summary:
+                msg += f"📝 <b>Analysis:</b>\n{e(summary)}\n"
 
-                messages.append(msg)
+            messages.append(msg)
 
         # Plain emails section
-        if content.get('plain_emails'):
-            for i, em in enumerate(content['plain_emails'], 1):
-                msg = f"📩 **Email {i}**\n\n"
-                msg += f"**{em['subject']}**\n"
-                msg += f"From: {em['from']}\n"
-                msg += f"Date: {em['date']}\n\n"
-                msg += f"📝 **Summary:**\n{em['summary']}\n"
-                messages.append(msg)
+        for i, em in enumerate(content.get('plain_emails', []), 1):
+            msg = f"📩 <b>Email {i}</b>\n\n"
+            msg += f"<b>{e(em['subject'])}</b>\n"
+            msg += f"From: {e(em['from'])}\n"
+            msg += f"Date: {em['date']}\n\n"
+            msg += f"📝 <b>Summary:</b>\n{e(em['summary'])}\n"
+            messages.append(msg)
 
         # Footer
-        final = f"\n✅ **All data saved to prepared_content.json**\n"
+        final = f"\n✅ <b>All data saved to prepared_content.json</b>\n"
         final += f"Timestamp: {content['timestamp']}"
         messages.append(final)
 

@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 from anthropic import Anthropic
 from yt_dlp import YoutubeDL
+from youtube_transcript_api import YouTubeTranscriptApi
 
 from prompt_builder import PromptBuilder
 
@@ -37,19 +38,19 @@ class YouTubeExtractor:
         return list(set(links))  # Remove duplicates
     
     @staticmethod
+    def _extract_video_id(url: str) -> Optional[str]:
+        """Extract video ID from any YouTube URL format."""
+        match = re.search(r'(?:v=|youtu\.be/|embed/)([A-Za-z0-9_-]{11})', url)
+        return match.group(1) if match else None
+
+    @staticmethod
     def get_video_info(url: str) -> Optional[Dict]:
-        """Get YouTube video metadata using yt-dlp"""
+        """Get YouTube video metadata using yt-dlp, with fallback when blocked."""
+        print(f"  📥 Fetching video info...")
         try:
-            print(f"  📥 Fetching video info...")
-            ydl_opts = {
-                'quiet': True,
-                'no_warnings': True,
-                'skip_download': True,
-            }
-            
+            ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True}
             with YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
-            
             return {
                 'video_id': info.get('id', ''),
                 'url': url,
@@ -62,76 +63,38 @@ class YouTubeExtractor:
                 'thumbnail': info.get('thumbnail', '')
             }
         except Exception as e:
-            print(f"  ❌ Error getting video info: {e}")
-            return None
-    
+            print(f"  ⚠️ yt-dlp blocked, using fallback: {e}")
+            video_id = YouTubeExtractor._extract_video_id(url)
+            return {
+                'video_id': video_id or '',
+                'url': url,
+                'title': f'YouTube ({video_id})',
+                'description': '',
+                'channel': 'Unknown',
+                'duration': 0,
+                'upload_date': '',
+                'view_count': 0,
+                'thumbnail': ''
+            }
+
     @staticmethod
     def get_transcript(url: str) -> Optional[str]:
-        """Get full transcript from YouTube"""
+        """Get transcript using youtube-transcript-api (CI-friendly)."""
         try:
             print(f"  📝 Extracting transcript...")
-            
-            ydl_opts = {
-                'quiet': True,
-                'no_warnings': True,
-                'skip_download': True,
-                'writesubtitles': True,
-                'writeautomaticsub': True,
-                'subtitlesformat': 'vtt',
-            }
-            
-            with YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-            
-            # Check if subtitles are available
-            if not info.get('subtitles') and not info.get('automatic_captions'):
-                print(f"  ⚠️ No transcript available for this video")
+            video_id = YouTubeExtractor._extract_video_id(url)
+            if not video_id:
+                print(f"  ⚠️ Could not extract video ID from URL")
                 return None
-            
-            # Get English subtitles first, then any available
-            subtitles = info.get('subtitles', {}) or info.get('automatic_captions', {})
-            
-            transcript_text = ""
-            
-            # Try English first
-            if 'en' in subtitles:
-                for sub in subtitles['en']:
-                    if sub.get('data'):
-                        transcript_text = sub['data']
-                        break
-            
-            # If no English, try any language
-            if not transcript_text:
-                for lang, subs in subtitles.items():
-                    for sub in subs:
-                        if sub.get('data'):
-                            transcript_text = sub['data']
-                            break
-                    if transcript_text:
-                        break
-            
-            # Parse VTT format (remove timestamps)
-            if transcript_text:
-                # Remove VTT headers and timestamps
-                lines = transcript_text.split('\n')
-                clean_lines = []
-                for line in lines:
-                    # Skip VTT headers and empty lines
-                    if line.startswith('WEBVTT') or line.startswith('NOTE') or '-->' in line or not line.strip():
-                        continue
-                    # Skip cue identifiers (numbers)
-                    if line.isdigit():
-                        continue
-                    clean_lines.append(line.strip())
-                
-                transcript = ' '.join(clean_lines)
-                print(f"  ✅ Got transcript ({len(transcript)} chars)")
-                return transcript[:10000]  # Limit to 10K chars for API
-            
-            return None
-            
+
+            transcript_list = YouTubeTranscriptApi.get_transcript(
+                video_id, languages=['en', 'en-US', 'en-GB', 'a.en']
+            )
+            text = ' '.join(item['text'] for item in transcript_list)
+            print(f"  ✅ Got transcript ({len(text)} chars)")
+            return text[:10000]
         except Exception as e:
-            print(f"  ⚠️ Error getting transcript: {e}")
+            print(f"  ⚠️ Transcript not available: {e}")
             return None
     
     @staticmethod
