@@ -15,12 +15,12 @@ from typing import List, Dict
 import sys
 
 # Pridaj src do path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 try:
-    from extractors import YouTubeExtractor, GitHubExtractor, ContentPreparator
+    from extractors_full import YouTubeExtractor, GitHubExtractor, ContentPreparator
 except ImportError:
-    print("❌ Error: extractors.py not found in src/")
+    print("❌ Error: extractors_full.py not found in src/")
     sys.exit(1)
 
 # Anthropic client
