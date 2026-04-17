@@ -20,6 +20,15 @@ from prompt_builder import PromptBuilder
 
 client = Anthropic(api_key=os.getenv("CLAUDE_API_KEY_GITHUB_EMAIL"))
 
+
+def _split_take(text: str) -> tuple[str, str]:
+    """Split a Claude response into (intro, my_take) on the '🧠 MY TAKE:' boundary."""
+    marker = "🧠 MY TAKE:"
+    idx = text.find(marker)
+    if idx == -1:
+        return text.strip(), ""
+    return text[:idx].strip(), text[idx:].strip()
+
 class YouTubeExtractor:
     """Extract YouTube video info, transcripts and summarize"""
     
@@ -43,6 +52,21 @@ class YouTubeExtractor:
         """Extract video ID from any YouTube URL format."""
         match = re.search(r'(?:v=|youtu\.be/|embed/)([A-Za-z0-9_-]{11})', url)
         return match.group(1) if match else None
+
+    @staticmethod
+    def _sample_transcript(text: str, max_chars: int = 15000) -> str:
+        """Return a representative sample covering start, middle, and end of long transcripts."""
+        if len(text) <= max_chars:
+            return text
+        chunk = max_chars // 3
+        mid_start = (len(text) - chunk) // 2
+        return (
+            text[:chunk]
+            + "\n\n[...]\n\n"
+            + text[mid_start:mid_start + chunk]
+            + "\n\n[...]\n\n"
+            + text[-chunk:]
+        )
 
     class _SilentLogger:
         """Suppress all yt-dlp output — errors are still raised as exceptions."""
@@ -123,7 +147,7 @@ class YouTubeExtractor:
                         text = ' '.join(parts).strip()
                         if text:
                             print(f"  ✅ yt-dlp subtitle transcript ({len(text)} chars)")
-                            return text[:10000]
+                            return YouTubeExtractor._sample_transcript(text)
         except Exception as e:
             print(f"  ⚠️ yt-dlp subtitle extraction failed: {e}")
         return None
@@ -157,7 +181,7 @@ class YouTubeExtractor:
                         )
                     if text:
                         print(f"  ✅ Supadata transcript ({len(text)} chars)")
-                        return text[:10000]
+                        return YouTubeExtractor._sample_transcript(text)
                 else:
                     print(f"  ⚠️ Supadata error: {resp.status_code}")
             except Exception as e:
@@ -174,7 +198,7 @@ class YouTubeExtractor:
             fetched = api.fetch(video_id)
             text = " ".join(item.text for item in fetched)
             print(f"  ✅ youtube-transcript-api transcript ({len(text)} chars)")
-            return text[:10000]
+            return YouTubeExtractor._sample_transcript(text)
         except Exception:
             pass
 
@@ -184,7 +208,7 @@ class YouTubeExtractor:
             )
             text = " ".join(item["text"] for item in transcript_list)
             print(f"  ✅ youtube-transcript-api v0 transcript ({len(text)} chars)")
-            return text[:10000]
+            return YouTubeExtractor._sample_transcript(text)
         except Exception as e:
             print(f"  ⚠️ All transcript sources failed: {e}")
             return None
@@ -204,8 +228,8 @@ class YouTubeExtractor:
                 messages=[{"role": "user", "content": prompt}]
             )
             
-            summary_text = response.content[0].text
-            
+            intro, my_take = _split_take(response.content[0].text)
+
             return {
                 'type': 'youtube_video',
                 'url': url,
@@ -213,7 +237,8 @@ class YouTubeExtractor:
                 'description': description[:500] if description else '',
                 'transcript_preview': transcript[:1500] if transcript else '',
                 'has_full_transcript': bool(transcript),
-                'detailed_notes': summary_text,
+                'summary': intro,
+                'my_take': my_take,
                 'processed_at': datetime.now().isoformat(),
                 'source': 'email'
             }
@@ -307,8 +332,8 @@ class GitHubExtractor:
                 messages=[{"role": "user", "content": prompt}]
             )
             
-            summary_text = response.content[0].text
-            
+            intro, my_take = _split_take(response.content[0].text)
+
             return {
                 'type': 'github_repo',
                 'url': repo_info['url'],
@@ -319,7 +344,8 @@ class GitHubExtractor:
                 'forks': repo_info.get('forks', 0),
                 'language': repo_info.get('language', 'Unknown'),
                 'topics': repo_info.get('topics', []),
-                'detailed_summary': summary_text,
+                'summary': intro,
+                'my_take': my_take,
                 'readme_preview': repo_info.get('readme', '')[:500],
                 'processed_at': datetime.now().isoformat(),
                 'source': 'email'
@@ -384,14 +410,16 @@ class WebArticleExtractor:
             )
             response = client.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=512,
+                max_tokens=600,
                 messages=[{"role": "user", "content": prompt}],
             )
+            intro, my_take = _split_take(response.content[0].text)
             return {
                 'type': 'web_article',
                 'url': article_data['url'],
                 'title': article_data['title'],
-                'summary': response.content[0].text,
+                'summary': intro,
+                'my_take': my_take,
                 'processed_at': datetime.now().isoformat(),
             }
         except Exception as e:

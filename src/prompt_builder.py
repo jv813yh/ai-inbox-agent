@@ -23,7 +23,7 @@ class PromptBuilder:
         if description:
             context_parts.append(f"Description: {description[:2000]}")
         if transcript:
-            context_parts.append(f"Transcript:\n{transcript[:5000]}")
+            context_parts.append(f"Transcript:\n{transcript[:12000]}")
         if email_context:
             context_parts.append(f"Email content (use this as primary context if no transcript):\n{email_context[:3000]}")
 

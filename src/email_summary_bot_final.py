@@ -434,79 +434,117 @@ class EmailBot:
                     )
                 }]
             )
-            summary_text = response.content[0].text
+            raw = response.content[0].text
         except Exception as e:
             print(f"⚠️ Claude summarization failed: {e}")
-            summary_text = email_data['body'][:500]
+            raw = email_data['body'][:500]
+
+        marker = "🧠 MY TAKE:"
+        idx = raw.find(marker)
+        summary = raw[:idx].strip() if idx != -1 else raw.strip()
+        my_take = raw[idx:].strip() if idx != -1 else ""
 
         return {
             'subject': email_data['subject'],
             'from': email_data['from'],
             'date': email_data['date'],
-            'summary': summary_text
+            'summary': summary,
+            'my_take': my_take,
         }
 
     def _create_summary_messages(self, content: Dict) -> List[str]:
-        """Build HTML-formatted Telegram messages (may produce multiple per item)."""
+        """Build grouped HTML-formatted Telegram messages — one per content category."""
         messages = []
 
         def esc(text: str) -> str:
-            """Escape HTML special chars in AI/user-generated content."""
             return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-        # Header
-        header = (
-            f"📧 <b>Email Summary</b> — "
+        youtube  = content.get('youtube', [])
+        articles = content.get('articles', [])
+        github   = content.get('github', [])
+        emails   = content.get('plain_emails', [])
+
+        # ── Overview (table of contents) ────────────────────────────────────
+        overview = (
+            f"📧 <b>Email Digest</b> — "
             f"<i>{datetime.now().strftime('%Y-%m-%d %H:%M')}</i>\n"
-            f"✅ Processed <b>{content['emails_processed']}</b> email(s)"
+            f"Processed <b>{content['emails_processed']}</b> email(s)\n\n"
         )
-        messages.append(header)
+        if youtube:
+            overview += f"🎥 <b>YouTube ({len(youtube)})</b>\n"
+            for i, v in enumerate(youtube, 1):
+                overview += f"  {i}. {esc(v.get('title', 'Unknown'))}\n"
+            overview += "\n"
+        if articles:
+            overview += f"📰 <b>Articles ({len(articles)})</b>\n"
+            for i, a in enumerate(articles, 1):
+                overview += f"  {i}. {esc(a.get('title', 'Untitled'))} — {esc(a['url'])}\n"
+            overview += "\n"
+        if github:
+            overview += f"🐙 <b>GitHub ({len(github)})</b>\n"
+            for i, r in enumerate(github, 1):
+                overview += f"  {i}. {esc(r['owner'])}/{esc(r['repo'])} ⭐{r.get('stars', 0)}\n"
+            overview += "\n"
+        if emails:
+            overview += f"📩 <b>Other emails ({len(emails)})</b>\n"
+            for i, e in enumerate(emails, 1):
+                overview += f"  {i}. {esc(e['subject'])} — <i>{esc(e['from'])}</i>\n"
+        messages.append(overview.strip())
 
-        # YouTube section
-        for i, video in enumerate(content.get('youtube', []), 1):
-            msg = f"🎥 <b>YouTube Video {i}</b>\n\n"
-            msg += f"<b>{esc(video.get('title', 'Unknown'))}</b>\n"
-            msg += f"🔗 {esc(video['url'])}\n\n"
-            notes = video.get('detailed_notes', '')
-            if notes:
-                msg += f"📝 <b>Notes:</b>\n{esc(notes)}"
-            if video.get('has_full_transcript'):
-                msg += "\n\n✅ <i>Full transcript saved in prepared_content.json</i>"
-            messages.append(msg)
+        # ── YouTube — all videos in one message (chunked if needed) ─────────
+        if youtube:
+            block = f"🎥 <b>YouTube Videos</b>\n"
+            for i, video in enumerate(youtube, 1):
+                block += f"\n{'─' * 30}\n"
+                block += f"<b>{i}. {esc(video.get('title', 'Unknown'))}</b>\n"
+                block += f"🔗 {esc(video['url'])}\n\n"
+                if video.get('summary'):
+                    block += f"{esc(video['summary'])}\n"
+                if video.get('my_take'):
+                    block += f"\n{esc(video['my_take'])}\n"
+                if video.get('has_full_transcript'):
+                    block += "\n✅ <i>Transcript sampled from full video</i>\n"
+            messages.append(block.strip())
 
-        # Article section
-        for i, art in enumerate(content.get('articles', []), 1):
-            msg = f"📰 <b>Article {i}</b>\n\n"
-            msg += f"<b>{esc(art.get('title', 'Untitled'))}</b>\n"
-            msg += f"🔗 {esc(art['url'])}\n\n"
-            msg += f"📝 <b>Summary:</b>\n{esc(art.get('summary', ''))}"
-            messages.append(msg)
+        # ── Articles — all in one message ────────────────────────────────────
+        if articles:
+            block = f"📰 <b>Articles</b>\n"
+            for i, art in enumerate(articles, 1):
+                block += f"\n{'─' * 30}\n"
+                block += f"<b>{i}. {esc(art.get('title', 'Untitled'))}</b>\n"
+                block += f"🔗 {esc(art['url'])}\n\n"
+                if art.get('summary'):
+                    block += f"{esc(art['summary'])}\n"
+                if art.get('my_take'):
+                    block += f"\n{esc(art['my_take'])}\n"
+            messages.append(block.strip())
 
-        # GitHub section
-        for i, repo in enumerate(content.get('github', []), 1):
-            msg = f"🐙 <b>GitHub Repo {i}</b>\n\n"
-            msg += f"<b>{esc(repo['owner'])}/{esc(repo['repo'])}</b>\n"
-            msg += f"🔗 {esc(repo['url'])}\n"
-            msg += f"⭐ Stars: <b>{repo.get('stars', 0)}</b>\n\n"
-            summary = repo.get('detailed_summary', '')
-            if summary:
-                msg += f"📝 <b>Analysis:</b>\n{esc(summary)}"
-            messages.append(msg)
+        # ── GitHub — all repos in one message ────────────────────────────────
+        if github:
+            block = f"🐙 <b>GitHub Repos</b>\n"
+            for i, repo in enumerate(github, 1):
+                block += f"\n{'─' * 30}\n"
+                block += f"<b>{i}. {esc(repo['owner'])}/{esc(repo['repo'])}</b>"
+                block += f"  ⭐ {repo.get('stars', 0)}\n"
+                block += f"🔗 {esc(repo['url'])}\n\n"
+                if repo.get('summary'):
+                    block += f"{esc(repo['summary'])}\n"
+                if repo.get('my_take'):
+                    block += f"\n{esc(repo['my_take'])}\n"
+            messages.append(block.strip())
 
-        # Plain emails section
-        for i, em in enumerate(content.get('plain_emails', []), 1):
-            msg = f"📩 <b>Email {i}</b>\n\n"
-            msg += f"<b>{esc(em['subject'])}</b>\n"
-            msg += f"<i>From:</i> {esc(em['from'])}\n"
-            msg += f"<i>Date:</i> {esc(em['date'])}\n\n"
-            msg += f"📝 <b>Summary:</b>\n{esc(em['summary'])}"
-            messages.append(msg)
-
-        # Footer
-        messages.append(
-            f"✅ <b>All data saved to prepared_content.json</b>\n"
-            f"<i>Timestamp: {content['timestamp']}</i>"
-        )
+        # ── Plain emails — all in one message ────────────────────────────────
+        if emails:
+            block = f"📩 <b>Other Emails</b>\n"
+            for i, em in enumerate(emails, 1):
+                block += f"\n{'─' * 30}\n"
+                block += f"<b>{i}. {esc(em['subject'])}</b>\n"
+                block += f"<i>{esc(em['from'])}</i> · <i>{esc(em['date'])}</i>\n\n"
+                if em.get('summary'):
+                    block += f"{esc(em['summary'])}\n"
+                if em.get('my_take'):
+                    block += f"\n{esc(em['my_take'])}\n"
+            messages.append(block.strip())
 
         return messages
 

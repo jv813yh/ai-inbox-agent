@@ -91,6 +91,21 @@ Rating with explanation.
 What to read or watch next to go deeper on this topic.\
 """
 
+YOUTUBE_V2 = """\
+You are a journalist writing a short introduction to a YouTube video — the kind that \
+makes a reader stop scrolling and decide to watch. Write 4-5 sentences in plain text: \
+hook the reader with what the video is about, mention the single most interesting insight \
+or moment, and explain in one sentence why it is worth the time. Do NOT use Markdown, \
+bullet points, or section headers.
+
+After the introduction, add one blank line, then write a paragraph that starts exactly \
+with the label "🧠 MY TAKE:" followed by 2-3 sentences sharing what you personally find \
+most interesting or exciting about this content, and where you see the biggest potential \
+or opportunity in it.
+
+{context}\
+"""
+
 # ---------------------------------------------------------------------------
 # GitHub prompts
 # ---------------------------------------------------------------------------
@@ -153,6 +168,30 @@ Who is it ideal for and when should you study it?
 What you should know or do before getting started.\
 """
 
+GITHUB_V2 = """\
+You are a journalist writing a short introduction to a GitHub project — the kind that \
+makes a developer stop and want to open the repo. Write 4-5 sentences in plain text: \
+what the project does, what makes it stand out from the crowd, and who should care about it. \
+Close with one sentence on the practical takeaway. Do NOT use Markdown, bullet points, \
+or section headers.
+
+After the introduction, add one blank line, then write a paragraph that starts exactly \
+with the label "🧠 MY TAKE:" followed by 2-3 sentences sharing what you personally find \
+most interesting or exciting about this project, and where you see the biggest potential \
+or opportunity for developers.
+
+Project: {repo}
+Owner: {owner}
+URL: {url}
+Description: {description}
+Stars: {stars} | Forks: {forks} | Language: {language}
+Topics: {topics}
+Last updated: {updated_at}
+
+README excerpt:
+{readme}\
+"""
+
 # ---------------------------------------------------------------------------
 # Plain email prompts
 # ---------------------------------------------------------------------------
@@ -160,6 +199,10 @@ What you should know or do before getting started.\
 PLAIN_EMAIL_V1 = """\
 Summarize this email clearly and concisely in 3-5 bullet points.
 Focus on the key information and any action items.
+
+After the bullet points, add one blank line, then write a paragraph that starts exactly \
+with the label "🧠 MY TAKE:" followed by 1-2 sentences sharing what you personally find \
+most interesting or noteworthy about this email, and any potential you see in it.
 
 Subject: {subject}
 From: {from_addr}
@@ -184,11 +227,29 @@ Content:
 {content}\
 """
 
+ARTICLE_V2 = """\
+You are a journalist writing a short introduction to an article — the kind that makes \
+a reader immediately want to open the link. Write 4-5 sentences in plain text: \
+what the article is about, the single most interesting insight or claim, and why it \
+matters right now. Do NOT use Markdown, bullet points, or section headers.
+
+After the introduction, add one blank line, then write a paragraph that starts exactly \
+with the label "🧠 MY TAKE:" followed by 2-3 sentences sharing what you personally find \
+most interesting or exciting about this article, and where you see the biggest potential \
+or relevance in the ideas presented.
+
+Title: {title}
+URL: {url}
+
+Content:
+{content}\
+"""
+
 # ---------------------------------------------------------------------------
 # Active versions — change these single lines to switch prompts everywhere
 # ---------------------------------------------------------------------------
 
-latest_youtube = YOUTUBE_V1
-latest_github = GITHUB_V1
+latest_youtube = YOUTUBE_V2
+latest_github = GITHUB_V2
 latest_plain_email = PLAIN_EMAIL_V1
-latest_article = ARTICLE_V1
+latest_article = ARTICLE_V2
