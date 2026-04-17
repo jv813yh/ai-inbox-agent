@@ -8,7 +8,7 @@ Switch a prompt by changing `latest_*` in prompts.py — nothing here changes.
 
 from typing import Dict
 
-from prompts import latest_github, latest_plain_email, latest_youtube
+from prompts import latest_article, latest_github, latest_plain_email, latest_youtube
 
 
 class PromptBuilder:
@@ -53,4 +53,13 @@ class PromptBuilder:
             subject=subject,
             from_addr=from_addr,
             body=body[:3000],
+        )
+
+    @staticmethod
+    def article(title: str, url: str, content: str) -> str:
+        """Apply the active web-article prompt template."""
+        return latest_article.format(
+            title=title,
+            url=url,
+            content=content[:4000],
         )

@@ -169,9 +169,26 @@ Body:
 """
 
 # ---------------------------------------------------------------------------
+# Web article prompts
+# ---------------------------------------------------------------------------
+
+ARTICLE_V1 = """\
+Summarize this article in 3-4 sentences. Describe the main topic, the key insight \
+or finding, and why it is relevant. Keep it informative but brief — enough to decide \
+whether to read the full article. Do not use Markdown.
+
+Title: {title}
+URL: {url}
+
+Content:
+{content}\
+"""
+
+# ---------------------------------------------------------------------------
 # Active versions — change these single lines to switch prompts everywhere
 # ---------------------------------------------------------------------------
 
 latest_youtube = YOUTUBE_V1
 latest_github = GITHUB_V1
 latest_plain_email = PLAIN_EMAIL_V1
+latest_article = ARTICLE_V1

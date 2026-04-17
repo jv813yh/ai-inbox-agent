@@ -14,6 +14,7 @@ from typing import Dict, List, Optional
 from anthropic import Anthropic
 from yt_dlp import YoutubeDL
 from youtube_transcript_api import YouTubeTranscriptApi
+from bs4 import BeautifulSoup
 
 from prompt_builder import PromptBuilder
 
@@ -89,8 +90,47 @@ class YouTubeExtractor:
             }
 
     @staticmethod
+    def _get_transcript_via_ytdlp(video_id: str) -> Optional[str]:
+        """Extract transcript from YouTube auto-captions via yt-dlp subtitle URLs."""
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        try:
+            ydl_opts = {
+                'skip_download': True,
+                'quiet': True,
+                'no_warnings': True,
+                'logger': YouTubeExtractor._SilentLogger(),
+            }
+            with YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+
+            for sub_dict in [info.get('subtitles', {}), info.get('automatic_captions', {})]:
+                for lang in ['en', 'en-US', 'en-GB']:
+                    if lang not in sub_dict:
+                        continue
+                    for fmt in sub_dict[lang]:
+                        if fmt.get('ext') != 'json3':
+                            continue
+                        resp = requests.get(fmt['url'], timeout=15)
+                        if resp.status_code != 200:
+                            continue
+                        events = resp.json().get('events', [])
+                        parts = [
+                            seg.get('utf8', '')
+                            for event in events
+                            for seg in event.get('segs', [])
+                            if seg.get('utf8', '') not in ('', '\n')
+                        ]
+                        text = ' '.join(parts).strip()
+                        if text:
+                            print(f"  ✅ yt-dlp subtitle transcript ({len(text)} chars)")
+                            return text[:10000]
+        except Exception as e:
+            print(f"  ⚠️ yt-dlp subtitle extraction failed: {e}")
+        return None
+
+    @staticmethod
     def get_transcript(url: str) -> Optional[str]:
-        """Fetch transcript: Supadata API → youtube-transcript-api → None."""
+        """Fetch transcript: Supadata API → yt-dlp subtitles → youtube-transcript-api → None."""
         print(f"  📝 Extracting transcript...")
         video_id = YouTubeExtractor._extract_video_id(url)
         if not video_id:
@@ -123,7 +163,12 @@ class YouTubeExtractor:
             except Exception as e:
                 print(f"  ⚠️ Supadata failed: {e}")
 
-        # 2. youtube-transcript-api (handles both v0.x and v1.x)
+        # 2. yt-dlp subtitle extraction (fetches caption URLs directly)
+        text = YouTubeExtractor._get_transcript_via_ytdlp(video_id)
+        if text:
+            return text
+
+        # 3. youtube-transcript-api (handles both v0.x and v1.x)
         try:
             api = YouTubeTranscriptApi()                          # v1.x
             fetched = api.fetch(video_id)
@@ -283,6 +328,76 @@ class GitHubExtractor:
         except Exception as e:
             print(f"  ❌ Error summarizing repo: {e}")
             return None
+
+class WebArticleExtractor:
+    """Fetch and summarize web articles linked in emails."""
+
+    @staticmethod
+    def extract_urls(text: str) -> List[str]:
+        """Extract HTTP(S) URLs that are not YouTube or GitHub links."""
+        pattern = r'https?://[^\s<>"\'\]]+[^\s<>"\'\]\.\,\;\:\!\?]'
+        urls = re.findall(pattern, text)
+        filtered = []
+        for url in urls:
+            if 'youtube.com' in url or 'youtu.be' in url:
+                continue
+            if 'github.com' in url:
+                continue
+            filtered.append(url)
+        return list(dict.fromkeys(filtered))  # deduplicate, preserve order
+
+    @staticmethod
+    def fetch_article(url: str) -> Optional[Dict]:
+        """Fetch a URL and extract its readable text content."""
+        try:
+            headers = {'User-Agent': 'Mozilla/5.0 (compatible; EmailBot/1.0)'}
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code != 200:
+                print(f"  ⚠️ HTTP {resp.status_code} for {url}")
+                return None
+
+            soup = BeautifulSoup(resp.text, 'html.parser')
+
+            title = ''
+            if soup.title and soup.title.string:
+                title = soup.title.string.strip()
+
+            for tag in soup(['script', 'style', 'nav', 'header', 'footer', 'aside', 'form']):
+                tag.decompose()
+
+            text = re.sub(r'\s+', ' ', soup.get_text(separator=' ', strip=True)).strip()
+            print(f"  ✅ Fetched article: {title[:60]} ({len(text)} chars)")
+            return {'url': url, 'title': title, 'content': text[:5000]}
+        except Exception as e:
+            print(f"  ⚠️ Failed to fetch {url}: {e}")
+            return None
+
+    @staticmethod
+    def summarize_article(article_data: Dict) -> Optional[Dict]:
+        """Summarize an article with Claude."""
+        try:
+            from prompt_builder import PromptBuilder
+            prompt = PromptBuilder.article(
+                article_data['title'],
+                article_data['url'],
+                article_data['content'],
+            )
+            response = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=512,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return {
+                'type': 'web_article',
+                'url': article_data['url'],
+                'title': article_data['title'],
+                'summary': response.content[0].text,
+                'processed_at': datetime.now().isoformat(),
+            }
+        except Exception as e:
+            print(f"  ❌ Error summarizing article: {e}")
+            return None
+
 
 class ContentPreparator:
     """Prepare content data for vector database"""

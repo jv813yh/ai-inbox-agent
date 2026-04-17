@@ -18,7 +18,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 try:
-    from extractors_full import YouTubeExtractor, GitHubExtractor, ContentPreparator
+    from extractors_full import YouTubeExtractor, GitHubExtractor, ContentPreparator, WebArticleExtractor
     from prompt_builder import PromptBuilder
 except ImportError:
     print("❌ Error: extractors_full.py or prompt_builder.py not found in src/")
@@ -328,6 +328,7 @@ class EmailBot:
             all_content = {
                 'youtube': [],
                 'github': [],
+                'articles': [],
                 'plain_emails': [],
                 'emails_processed': len(emails),
                 'timestamp': datetime.now().isoformat()
@@ -363,7 +364,19 @@ class EmailBot:
                     all_content['github'].extend(gh_data)
                     found_special = True
 
-                # Plain email — no YouTube/GitHub links → summarize with Claude
+                # Auto-detect: article/blog links (non-YouTube, non-GitHub URLs)
+                article_urls = WebArticleExtractor.extract_urls(body)
+                if article_urls:
+                    print(f"\n📰 Found {len(article_urls)} article link(s)")
+                    for art_url in article_urls:
+                        article_data = WebArticleExtractor.fetch_article(art_url)
+                        if article_data:
+                            summary = WebArticleExtractor.summarize_article(article_data)
+                            if summary:
+                                all_content['articles'].append(summary)
+                    found_special = True
+
+                # Plain email — no special links → summarize with Claude
                 if not found_special:
                     print(f"\n📝 Plain email — summarizing with Claude...")
                     summary = self._summarize_plain_email(email_data)
@@ -459,6 +472,14 @@ class EmailBot:
                 msg += f"📝 <b>Notes:</b>\n{esc(notes)}"
             if video.get('has_full_transcript'):
                 msg += "\n\n✅ <i>Full transcript saved in prepared_content.json</i>"
+            messages.append(msg)
+
+        # Article section
+        for i, art in enumerate(content.get('articles', []), 1):
+            msg = f"📰 <b>Article {i}</b>\n\n"
+            msg += f"<b>{esc(art.get('title', 'Untitled'))}</b>\n"
+            msg += f"🔗 {esc(art['url'])}\n\n"
+            msg += f"📝 <b>Summary:</b>\n{esc(art.get('summary', ''))}"
             messages.append(msg)
 
         # GitHub section
