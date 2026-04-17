@@ -90,31 +90,68 @@ class YouTubeExtractor:
 
     @staticmethod
     def get_transcript(url: str) -> Optional[str]:
-        """Get transcript using youtube-transcript-api (CI-friendly)."""
-        try:
-            print(f"  📝 Extracting transcript...")
-            video_id = YouTubeExtractor._extract_video_id(url)
-            if not video_id:
-                print(f"  ⚠️ Could not extract video ID from URL")
-                return None
+        """Fetch transcript: Supadata API → youtube-transcript-api → None."""
+        print(f"  📝 Extracting transcript...")
+        video_id = YouTubeExtractor._extract_video_id(url)
+        if not video_id:
+            print(f"  ⚠️ Could not extract video ID from URL")
+            return None
 
-            transcript_list = YouTubeTranscriptApi.get_transcript(
-                video_id, languages=['en', 'en-US', 'en-GB', 'a.en']
+        # 1. Supadata API (bypasses YouTube bot detection)
+        supadata_key = os.getenv("SUPADATA_API_KEY")
+        if supadata_key:
+            try:
+                resp = requests.get(
+                    "https://api.supadata.ai/v1/youtube/transcript",
+                    params={"videoId": video_id, "text": "true"},
+                    headers={"x-api-key": supadata_key},
+                    timeout=15,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    text = data.get("content") or data.get("transcript") or ""
+                    if isinstance(text, list):
+                        text = " ".join(
+                            item.get("text", "") if isinstance(item, dict) else str(item)
+                            for item in text
+                        )
+                    if text:
+                        print(f"  ✅ Supadata transcript ({len(text)} chars)")
+                        return text[:10000]
+                else:
+                    print(f"  ⚠️ Supadata error: {resp.status_code}")
+            except Exception as e:
+                print(f"  ⚠️ Supadata failed: {e}")
+
+        # 2. youtube-transcript-api (handles both v0.x and v1.x)
+        try:
+            api = YouTubeTranscriptApi()                          # v1.x
+            fetched = api.fetch(video_id)
+            text = " ".join(item.text for item in fetched)
+            print(f"  ✅ youtube-transcript-api transcript ({len(text)} chars)")
+            return text[:10000]
+        except Exception:
+            pass
+
+        try:
+            transcript_list = YouTubeTranscriptApi.get_transcript( # v0.x fallback
+                video_id, languages=["en", "en-US", "en-GB", "a.en"]
             )
-            text = ' '.join(item['text'] for item in transcript_list)
-            print(f"  ✅ Got transcript ({len(text)} chars)")
+            text = " ".join(item["text"] for item in transcript_list)
+            print(f"  ✅ youtube-transcript-api v0 transcript ({len(text)} chars)")
             return text[:10000]
         except Exception as e:
-            print(f"  ⚠️ Transcript not available: {e}")
+            print(f"  ⚠️ All transcript sources failed: {e}")
             return None
     
     @staticmethod
-    def summarize_video(url: str, title: str = "", description: str = "", transcript: str = "") -> Optional[Dict]:
+    def summarize_video(url: str, title: str = "", description: str = "",
+                        transcript: str = "", email_context: str = "") -> Optional[Dict]:
         """Summarize YouTube video using Claude - Teacher Notes Version"""
         try:
             print(f"  🤖 Summarizing with Claude (detailed notes mode)...")
-            
-            prompt = PromptBuilder.youtube(title, description, transcript)
+
+            prompt = PromptBuilder.youtube(title, description, transcript, email_context)
             
             response = client.messages.create(
                 model="claude-opus-4-6",
@@ -271,20 +308,19 @@ class ContentPreparator:
             # Get transcript via youtube-transcript-api
             transcript = YouTubeExtractor.get_transcript(url)
 
-            # If yt-dlp returned only a stub title AND no transcript,
-            # use the email body as description so Claude has real context
             title = video_info.get('title', '')
             description = video_info.get('description', '')
-            if not description and not transcript and email_body:
-                print(f"  ℹ️ Using email body as context (yt-dlp blocked, no transcript)")
-                description = email_body[:3000]
 
-            # Summarize
+            if email_body:
+                print(f"  ℹ️ Email body included as additional context")
+
+            # Summarize — always pass email_body separately so it is never truncated
             summary = YouTubeExtractor.summarize_video(
                 url,
                 title,
                 description,
-                transcript
+                transcript,
+                email_context=email_body
             )
             
             if summary:

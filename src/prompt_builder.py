@@ -14,17 +14,20 @@ from prompts import latest_github, latest_plain_email, latest_youtube
 class PromptBuilder:
 
     @staticmethod
-    def youtube(title: str = "", description: str = "", transcript: str = "") -> str:
+    def youtube(title: str = "", description: str = "",
+                transcript: str = "", email_context: str = "") -> str:
         """Apply the active YouTube prompt template."""
         context_parts = []
         if title:
             context_parts.append(f"Title: {title}")
         if description:
-            context_parts.append(f"Description: {description[:500]}")
+            context_parts.append(f"Description: {description[:2000]}")
         if transcript:
-            context_parts.append(f"Transcript (first 5000 characters): {transcript[:5000]}")
+            context_parts.append(f"Transcript:\n{transcript[:5000]}")
+        if email_context:
+            context_parts.append(f"Email content (use this as primary context if no transcript):\n{email_context[:3000]}")
 
-        context = "\n".join(context_parts)
+        context = "\n\n".join(context_parts)
         return latest_youtube.format(title=title, context=context)
 
     @staticmethod
