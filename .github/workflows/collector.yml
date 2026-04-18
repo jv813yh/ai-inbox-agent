@@ -23,6 +23,7 @@ jobs:
       - name: Run Collector Bot
         env:
           GMAIL_CREDENTIALS: ${{ secrets.GMAIL_CREDENTIALS }}
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY_GITHUB_EMAIL }}
           TZ: Europe/Bratislava
         working-directory: src
         run: python collector_bot.py

@@ -411,7 +411,7 @@ class WebArticleExtractor:
             )
             response = client.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=600,
+                max_tokens=1000,
                 messages=[{"role": "user", "content": prompt}],
             )
             intro, my_take = _split_take(response.content[0].text)
