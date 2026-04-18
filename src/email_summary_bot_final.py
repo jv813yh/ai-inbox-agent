@@ -496,7 +496,13 @@ class EmailBot:
         if youtube:
             overview += f"🎥 <b>YouTube ({len(youtube)})</b>\n"
             for i, v in enumerate(youtube, 1):
-                overview += f"  {i}. {esc(v.get('title', 'Unknown'))}\n"
+                title = esc(v.get('title', 'Unknown'))
+                url = esc(v.get('url', ''))
+                overview += f"  {i}. <a href=\"{url}\">{title}</a>\n"
+                summary = v.get('summary', '')
+                if summary:
+                    first_line = summary.split('\n')[0].strip()[:150]
+                    overview += f"     ↳ {esc(first_line)}\n"
             overview += "\n"
         if articles:
             overview += f"📰 <b>Articles ({len(articles)})</b>\n"
@@ -520,7 +526,7 @@ class EmailBot:
             for i, video in enumerate(youtube, 1):
                 block += f"\n{'─' * 30}\n"
                 block += f"<b>{i}. {esc(video.get('title', 'Unknown'))}</b>\n"
-                block += f"🔗 {esc(video['url'])}\n\n"
+                block += f"🔗 <a href=\"{esc(video['url'])}\">Watch on YouTube</a>\n\n"
                 if video.get('summary'):
                     block += f"{esc(video['summary'])}\n"
                 if video.get('my_take'):
