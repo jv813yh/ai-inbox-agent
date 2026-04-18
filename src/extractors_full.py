@@ -36,9 +36,10 @@ class YouTubeExtractor:
     def extract_youtube_links(text: str) -> List[str]:
         """Extract all YouTube URLs from text"""
         patterns = [
-            r'https?://(?:www\.)?youtube\.com/watch\?v=[^\s&]+',
-            r'https?://(?:www\.)?youtu\.be/[^\s?]+',
-            r'https?://(?:www\.)?youtube\.com/embed/[^\s?]+'
+            r'https?://(?:www\.|m\.)?youtube\.com/watch\?v=[^\s&]+',
+            r'https?://(?:www\.)?youtu\.be/[^\s?\s]+',
+            r'https?://(?:www\.|m\.)?youtube\.com/embed/[^\s?]+',
+            r'https?://(?:www\.|m\.)?youtube\.com/shorts/[^\s?]+',
         ]
         
         links = []
@@ -224,7 +225,7 @@ class YouTubeExtractor:
             
             response = client.messages.create(
                 model="claude-opus-4-6",
-                max_tokens=2500,
+                max_tokens=4000,
                 messages=[{"role": "user", "content": prompt}]
             )
             

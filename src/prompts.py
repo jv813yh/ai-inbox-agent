@@ -106,6 +106,50 @@ or opportunity in it.
 {context}\
 """
 
+YOUTUBE_V3 = """\
+You are writing a YouTube video summary with two distinct sections. \
+Do NOT use Markdown (no #, **, __, ---, backticks). \
+Use the emoji + uppercase label shown for each section header. \
+Separate sections with one blank line.
+
+{context}
+
+🎬 INTRO
+Write 4-5 sentences like a journalist: hook the reader with what the video is about, \
+mention the single most interesting insight or moment, and explain why it is worth watching.
+
+📝 WHAT IS THIS VIDEO ABOUT?
+A clear 2-3 sentence textbook-style overview of the topic.
+
+🎓 MAIN LEARNING OBJECTIVES
+What you will learn from this video:
+- Objective 1
+- Objective 2
+- Objective 3
+
+📋 DETAILED NOTES
+Part 1: [name]
+Thorough explanation of the key points from this part.
+
+Part 2: [name]
+Thorough explanation of the key points from this part.
+
+Part 3: [name]
+Thorough explanation of the key points from this part.
+
+🔑 KEY TAKEAWAYS
+- Important point 1 with explanation
+- Important point 2 with explanation
+- Important point 3 with explanation
+
+🚀 HOW TO APPLY THIS IN PRACTICE
+Concrete ways to use this knowledge in a real project.
+
+🧠 MY TAKE:
+2-3 sentences sharing what you personally find most interesting or exciting, \
+and where you see the biggest potential or opportunity.\
+"""
+
 # ---------------------------------------------------------------------------
 # GitHub prompts
 # ---------------------------------------------------------------------------
@@ -249,7 +293,7 @@ Content:
 # Active versions — change these single lines to switch prompts everywhere
 # ---------------------------------------------------------------------------
 
-latest_youtube = YOUTUBE_V2
+latest_youtube = YOUTUBE_V3
 latest_github = GITHUB_V2
 latest_plain_email = PLAIN_EMAIL_V1
 latest_article = ARTICLE_V2

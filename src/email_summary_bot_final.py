@@ -13,6 +13,7 @@ import requests
 from datetime import datetime
 from typing import List, Dict
 import sys
+from bs4 import BeautifulSoup
 
 # Add src to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -129,23 +130,45 @@ class EmailManager:
         }
 
     def _extract_body(self, msg) -> str:
-        """Extract plain text body from email"""
-        body = ""
+        """Extract text from email, falling back to HTML when no plain-text part exists."""
+        plain = ""
+        html = ""
+
+        def _decode(part) -> str:
+            raw = part.get_payload(decode=True)
+            if not raw:
+                return ""
+            try:
+                return raw.decode('utf-8')
+            except Exception:
+                return raw.decode('latin-1', errors='ignore')
+
         if msg.is_multipart():
             for part in msg.walk():
-                if part.get_content_type() == "text/plain":
-                    try:
-                        body = part.get_payload(decode=True).decode('utf-8')
-                    except:
-                        body = part.get_payload(decode=True).decode('latin-1', errors='ignore')
-                    break
+                ct = part.get_content_type()
+                if ct == "text/plain" and not plain:
+                    plain = _decode(part)
+                elif ct == "text/html" and not html:
+                    html = _decode(part)
         else:
-            try:
-                body = msg.get_payload(decode=True).decode('utf-8')
-            except:
-                body = msg.get_payload(decode=True).decode('latin-1', errors='ignore')
+            text = _decode(msg)
+            if msg.get_content_type() == "text/html":
+                html = text
+            else:
+                plain = text
 
-        return body
+        if plain:
+            return plain
+
+        # HTML-only email — strip tags so URL regexes can find links
+        if html:
+            soup = BeautifulSoup(html, 'html.parser')
+            # Preserve href URLs that might not appear as visible text
+            for a in soup.find_all('a', href=True):
+                a.insert_after(f" {a['href']} ")
+            return soup.get_text(separator=' ', strip=True)
+
+        return ""
 
     def mark_as_read(self, msg_ids: List[bytes]) -> bool:
         """Mark emails as read (\\Seen flag)"""
