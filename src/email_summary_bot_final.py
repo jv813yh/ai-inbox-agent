@@ -590,55 +590,67 @@ class EmailBot:
 
         messages.append(digest.strip())
 
-        # ── Messages 2…N: one detailed message per item ───────────────────────
+        # ── Messages 2…N: section banners + one detail message per item ─────────
 
-        for video in youtube:
-            block  = f"🎥 <b>{esc(video.get('title', 'Unknown'))}</b>\n"
-            block += f"🔗 <a href=\"{esc(video['url'])}\">Watch on YouTube</a>\n"
-            if video.get('source'):
-                block += f"📌 <i>Source: {esc(video['source'])}</i>\n"
-            if video.get('has_full_transcript'):
-                block += "<i>✅ Transcript sampled from full video</i>\n"
-            block += "\n"
-            if video.get('summary'):
-                block += esc(video['summary']) + "\n"
-            if video.get('my_take'):
-                block += "\n" + esc(video['my_take']) + "\n"
-            messages.append(block.strip())
+        def section_banner(icon: str, title: str, count: int) -> str:
+            line = "━" * 28
+            return f"{line}\n{icon}  <b>{title}</b>  ({count})\n{line}"
 
-        for art in articles:
-            block  = f"📰 <b>{esc(art.get('title', 'Untitled'))}</b>\n"
-            block += f"🔗 <a href=\"{esc(art['url'])}\">Read article</a>\n"
-            if art.get('source'):
-                block += f"📌 <i>Source: {esc(art['source'])}</i>\n"
-            block += "\n"
-            if art.get('summary'):
-                block += esc(art['summary']) + "\n"
-            if art.get('my_take'):
-                block += "\n" + esc(art['my_take']) + "\n"
-            messages.append(block.strip())
+        if youtube:
+            messages.append(section_banner("🎥", "YOUTUBE VIDEOS FROM EMAIL", len(youtube)))
+            for video in youtube:
+                block  = f"🎥 <b>{esc(video.get('title', 'Unknown'))}</b>\n"
+                block += f"🔗 <a href=\"{esc(video['url'])}\">Watch on YouTube</a>\n"
+                if video.get('source'):
+                    block += f"📌 <i>Source: {esc(video['source'])}</i>\n"
+                if video.get('has_full_transcript'):
+                    block += "<i>✅ Transcript sampled from full video</i>\n"
+                block += "\n"
+                if video.get('summary'):
+                    block += esc(video['summary']) + "\n"
+                if video.get('my_take'):
+                    block += "\n" + esc(video['my_take']) + "\n"
+                messages.append(block.strip())
 
-        for repo in github:
-            name   = f"{repo['owner']}/{repo['repo']}"
-            block  = f"🐙 <b>{esc(name)}</b>  ⭐ {repo.get('stars', 0)}\n"
-            block += f"🔗 <a href=\"{esc(repo['url'])}\">Open repo</a>\n"
-            if repo.get('source'):
-                block += f"📌 <i>Source: {esc(repo['source'])}</i>\n"
-            block += "\n"
-            if repo.get('summary'):
-                block += esc(repo['summary']) + "\n"
-            if repo.get('my_take'):
-                block += "\n" + esc(repo['my_take']) + "\n"
-            messages.append(block.strip())
+        if articles:
+            messages.append(section_banner("📰", "ARTICLES &amp; BLOGS FROM EMAIL", len(articles)))
+            for art in articles:
+                block  = f"📰 <b>{esc(art.get('title', 'Untitled'))}</b>\n"
+                block += f"🔗 <a href=\"{esc(art['url'])}\">Read article</a>\n"
+                if art.get('source'):
+                    block += f"📌 <i>Source: {esc(art['source'])}</i>\n"
+                block += "\n"
+                if art.get('summary'):
+                    block += esc(art['summary']) + "\n"
+                if art.get('my_take'):
+                    block += "\n" + esc(art['my_take']) + "\n"
+                messages.append(block.strip())
 
-        for em in emails:
-            block  = f"📩 <b>{esc(em['subject'])}</b>\n"
-            block += f"<i>{esc(em['from'])}</i> · <i>{esc(em['date'])}</i>\n\n"
-            if em.get('summary'):
-                block += esc(em['summary']) + "\n"
-            if em.get('my_take'):
-                block += "\n" + esc(em['my_take']) + "\n"
-            messages.append(block.strip())
+        if github:
+            messages.append(section_banner("🐙", "GITHUB REPOS FROM EMAIL", len(github)))
+            for repo in github:
+                name   = f"{repo['owner']}/{repo['repo']}"
+                block  = f"🐙 <b>{esc(name)}</b>  ⭐ {repo.get('stars', 0)}\n"
+                block += f"🔗 <a href=\"{esc(repo['url'])}\">Open repo</a>\n"
+                if repo.get('source'):
+                    block += f"📌 <i>Source: {esc(repo['source'])}</i>\n"
+                block += "\n"
+                if repo.get('summary'):
+                    block += esc(repo['summary']) + "\n"
+                if repo.get('my_take'):
+                    block += "\n" + esc(repo['my_take']) + "\n"
+                messages.append(block.strip())
+
+        if emails:
+            messages.append(section_banner("📩", "OTHER EMAILS", len(emails)))
+            for em in emails:
+                block  = f"📩 <b>{esc(em['subject'])}</b>\n"
+                block += f"<i>{esc(em['from'])}</i> · <i>{esc(em['date'])}</i>\n\n"
+                if em.get('summary'):
+                    block += esc(em['summary']) + "\n"
+                if em.get('my_take'):
+                    block += "\n" + esc(em['my_take']) + "\n"
+                messages.append(block.strip())
 
         return messages
 

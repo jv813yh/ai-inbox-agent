@@ -213,9 +213,13 @@ def process_video(video: Dict) -> Optional[Dict]:
 
 def build_channel_message(channel_name: str, results: List[Dict]) -> str:
     """Build a single Telegram message for all new videos from one channel."""
+    line = "━" * 28
+    count = len(results)
     header = (
-        f'📺 <b>{_esc(channel_name)}</b> — '
-        f'{len(results)} new video{"s" if len(results) != 1 else ""}\n'
+        f'{line}\n'
+        f'📺  <b>CHANNEL WATCH — {_esc(channel_name.upper())}</b>\n'
+        f'{line}\n'
+        f'{count} new video{"s" if count != 1 else ""}  ·  '
         f'<i>{datetime.now().strftime("%Y-%m-%d %H:%M")}</i>\n'
     )
 
