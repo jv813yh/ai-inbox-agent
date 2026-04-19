@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 cd src
 GMAIL_CREDENTIALS='{"email":"...","app_password":"..."}' \
-CLAUDE_API_KEY=sk-... \
+CLAUDE_API_KEY_GITHUB_EMAIL=sk-... \
 TELEGRAM_BOT_TOKEN=... \
 TELEGRAM_CHAT_ID=... \
 SUPADATA_API_KEY=... \
@@ -62,6 +62,7 @@ All workflows set `working-directory: src` and `TZ: Europe/Bratislava`.
 
 ## Known limitations
 
+- **Supadata** (`SUPADATA_API_KEY`) — preferred YouTube transcript source; bypasses bot detection that blocks yt-dlp on GitHub Actions IPs. Also supports general web scraping for AI use cases.
 - **YouTube URLs with non-standard parameter order** (e.g. `?app=desktop&v=ID`): fixed 2026-04-19 — regex now matches `watch?[^\s]+`.
 - **yt-dlp blocked on GitHub Actions IPs** — falls back to stub title; transcripts still attempted via youtube-transcript-api.
 - **LinkedIn links** — always fail (HTTP 999 / login wall). No authentication in place.
