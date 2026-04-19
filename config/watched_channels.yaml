@@ -10,23 +10,11 @@ channels:
   - name: "Andrej Karpathy"
     id: "UCXUPKJO5MZQEMU4rYNJMNkA"
 
-  - name: "Yannic Kilcher"
-    id: "UCZHmQk67mSJgfCCTn7xBfew"
-
-  - name: "Two Minute Papers"
-    id: "UCbfYPyITQ-7l4upoX8nvctg"
-
   - name: "AI Explained"
     id: "UCNJ1Ymd5yFuUPtn21xtRbbw"
 
   - name: "3Blue1Brown"
     id: "UCYO_jab_esuFRV4b17AJtAg"
-
-  - name: "Lex Fridman"
-    id: "UCSHZKyawb77ixDdsGog4iWA"
-
-  - name: "Matt Wolfe"
-    id: "UCgnfPPb9JI3e9A4cXiTOedA"
 
   - name: "Fireship"
     id: "UCsBjURrPoezykLs9EqgamOA"
