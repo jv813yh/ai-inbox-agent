@@ -1,0 +1,46 @@
+name: YouTube Queue
+
+on:
+  schedule:
+    - cron: '0 6 * * *'   # 06:00 UTC = 08:00 Europe/Bratislava (summer CEST)
+  workflow_dispatch:       # Manual trigger for testing
+
+permissions:
+  contents: write          # Needed to commit the cleared queue file back
+
+jobs:
+  process-queue:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install youtube-transcript-api yt-dlp
+
+      - name: Run YouTube Queue Bot
+        env:
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY_GITHUB_EMAIL }}
+          CLAUDE_API_KEY_GITHUB_EMAIL: ${{ secrets.CLAUDE_API_KEY_GITHUB_EMAIL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
+          TZ: Europe/Bratislava
+        working-directory: src
+        run: python youtube_queue_bot.py
+
+      # Commit the cleared queue file back so the repo stays clean
+      - name: Commit cleared queue
+        run: |
+          git config user.name  "youtube-queue-bot"
+          git config user.email "bot@github-actions"
+          git add config/youtube_queue.txt
+          git diff --cached --quiet || git commit -m "chore: clear youtube queue after processing"
+          git push
