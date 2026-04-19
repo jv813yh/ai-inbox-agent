@@ -18,12 +18,14 @@ The bot reads **unread** emails, processes all links, and sends results to Teleg
 
 ## Architecture
 
-Two separate pipelines run daily via GitHub Actions:
+Three separate pipelines run daily via GitHub Actions:
 
 ```
 18:00 UTC  collector_bot.py           — scrapes YouTube RSS, GitHub trending, ArXiv, HN, Reddit, RSS feeds
                                         → filters with Claude Haiku → sends emails to inbox
 20:00 UTC  email_summary_bot_final.py — reads those emails → extracts links → summarizes → Telegram
+21:00 UTC  channel_watcher_bot.py     — checks watched_channels.yaml for new videos per channel
+                                        → summarizes → one Telegram message per channel
 ```
 
 **Content routing in `email_summary_bot_final.py`:** Each email body is scanned for YouTube links → GitHub links → other URLs → if none, treated as plain email. Processing is handled by `extractors_full.py`.
@@ -53,12 +55,18 @@ To add a new content type: add a versioned constant in `prompts.py` + a method i
 
 | Workflow | Trigger | Entry point |
 |---|---|---|
-| `email-summary.yml` | 20:00 UTC daily | `src/email_summary_bot_final.py` |
 | `collector.yml` | 18:00 UTC daily | `src/collector_bot.py` |
+| `email-summary.yml` | 20:00 UTC daily | `src/email_summary_bot_final.py` |
+| `channel-watcher.yml` | 21:00 UTC daily | `src/channel_watcher_bot.py` |
 | `video-processor.yml` | manual | dedicated video processing |
 | `repo-evaluator.yml` | manual | GitHub repo evaluation |
 
 All workflows set `working-directory: src` and `TZ: Europe/Bratislava`.
+
+### Channel Watcher state persistence
+`channel_watcher_bot.py` stores `{channel_id: last_seen_video_id}` in `src/channel_state.json`. The workflow downloads this file as a GitHub Actions artifact at the start of each run (`channel-state`, retention 90 days) and uploads the updated version at the end. On the **first ever run**, the artifact won't exist (`continue-on-error: true`) — the bot seeds each channel with only its latest video to avoid flooding Telegram with history.
+
+Edit `config/watched_channels.yaml` to add/remove channels. Each entry needs `name` and `id` (YouTube channel ID).
 
 ## Known limitations
 
