@@ -373,15 +373,54 @@ class WebArticleExtractor:
             filtered.append(url)
         return list(dict.fromkeys(filtered))  # deduplicate, preserve order
 
+    _BROWSER_UA = (
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+        'AppleWebKit/537.36 (KHTML, like Gecko) '
+        'Chrome/124.0.0.0 Safari/537.36'
+    )
+
+    @staticmethod
+    def _fetch_via_supadata(url: str) -> Optional[Dict]:
+        """Fetch article content via Supadata web scraping API (fallback for blocked sites)."""
+        api_key = os.getenv('SUPADATA_API_KEY')
+        if not api_key:
+            return None
+        try:
+            resp = requests.get(
+                'https://api.supadata.ai/v1/web/scrape',
+                params={'url': url},
+                headers={'x-api-key': api_key},
+                timeout=15,
+            )
+            if resp.status_code != 200:
+                print(f"  ⚠️ Supadata web: HTTP {resp.status_code}")
+                return None
+            data = resp.json()
+            content = data.get('content') or data.get('text') or ''
+            title = data.get('title') or ''
+            if not content:
+                return None
+            print(f"  ✅ Supadata web article: {title[:60]} ({len(content)} chars)")
+            return {'url': url, 'title': title, 'content': content[:5000]}
+        except Exception as e:
+            print(f"  ⚠️ Supadata web failed: {e}")
+            return None
+
     @staticmethod
     def fetch_article(url: str) -> Optional[Dict]:
-        """Fetch a URL and extract its readable text content."""
+        """Fetch a URL and extract its readable text content.
+        Falls back to Supadata when the direct fetch is blocked (e.g. Medium/TDS 403).
+        """
         try:
-            headers = {'User-Agent': 'Mozilla/5.0 (compatible; EmailBot/1.0)'}
+            headers = {
+                'User-Agent': WebArticleExtractor._BROWSER_UA,
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+            }
             resp = requests.get(url, headers=headers, timeout=10)
             if resp.status_code != 200:
-                print(f"  ⚠️ HTTP {resp.status_code} for {url}")
-                return None
+                print(f"  ⚠️ HTTP {resp.status_code} for {url} — trying Supadata")
+                return WebArticleExtractor._fetch_via_supadata(url)
 
             soup = BeautifulSoup(resp.text, 'html.parser')
 
@@ -393,11 +432,19 @@ class WebArticleExtractor:
                 tag.decompose()
 
             text = re.sub(r'\s+', ' ', soup.get_text(separator=' ', strip=True)).strip()
+
+            # Paywall / login-wall detection — fall back to Supadata
+            if len(text) < 300 or 'sign in' in text[:500].lower() or '403 forbidden' in text[:200].lower():
+                print(f"  ⚠️ Content looks blocked ({len(text)} chars) — trying Supadata")
+                supadata_result = WebArticleExtractor._fetch_via_supadata(url)
+                if supadata_result:
+                    return supadata_result
+
             print(f"  ✅ Fetched article: {title[:60]} ({len(text)} chars)")
             return {'url': url, 'title': title, 'content': text[:5000]}
         except Exception as e:
             print(f"  ⚠️ Failed to fetch {url}: {e}")
-            return None
+            return WebArticleExtractor._fetch_via_supadata(url)
 
     @staticmethod
     def summarize_article(article_data: Dict) -> Optional[Dict]:

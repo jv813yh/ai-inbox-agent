@@ -629,11 +629,11 @@ def run():
 
     if yt_items:
         body = _build_video_body(yt_items)
-        sender.send(email_addr, 'AI interested stuff - video', body)
+        sender.send(email_addr, 'AI_VIDEO_BOT', body)
 
     if text_total > 0:
         body = _build_text_body(gh_items, arxiv_items, hn_items, reddit_items, rss_items)
-        sender.send(email_addr, 'AI interested stuff - text', body)
+        sender.send(email_addr, 'AI_TEXT_BOT', body)
 
     print('\n✅ Collection complete!')
 

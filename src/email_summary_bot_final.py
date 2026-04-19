@@ -369,13 +369,22 @@ class EmailBot:
                     EmailFilter.apply_filter(self.manager, email_data, filter_info)
 
                 body = email_data['body']
+                subject = email_data.get('subject', '')
                 found_special = False
+
+                # Determine source label for Telegram display
+                if subject in ('AI_VIDEO_BOT', 'AI_TEXT_BOT'):
+                    source = '🤖 AI Content Collection'
+                else:
+                    source = email_data.get('from', 'Unknown sender')
 
                 # Auto-detect: YouTube links in body
                 yt_urls = YouTubeExtractor.extract_youtube_links(body)
                 if yt_urls:
                     print(f"\n🎥 Found {len(yt_urls)} YouTube video(s)")
                     yt_data = ContentPreparator.prepare_youtube_batch(yt_urls, email_body=body)
+                    for item in yt_data:
+                        item['source'] = source
                     all_content['youtube'].extend(yt_data)
                     found_special = True
 
@@ -384,6 +393,8 @@ class EmailBot:
                 if gh_urls:
                     print(f"\n🐙 Found {len(gh_urls)} GitHub repo(s)")
                     gh_data = ContentPreparator.prepare_github_batch(gh_urls)
+                    for item in gh_data:
+                        item['source'] = source
                     all_content['github'].extend(gh_data)
                     found_special = True
 
@@ -396,6 +407,7 @@ class EmailBot:
                         if article_data:
                             summary = WebArticleExtractor.summarize_article(article_data)
                             if summary:
+                                summary['source'] = source
                                 all_content['articles'].append(summary)
                     found_special = True
 
@@ -403,6 +415,7 @@ class EmailBot:
                 if not found_special:
                     print(f"\n📝 Plain email — summarizing with Claude...")
                     summary = self._summarize_plain_email(email_data)
+                    summary['source'] = source
                     all_content['plain_emails'].append(summary)
 
             # 5. Mark all processed emails as read
@@ -525,11 +538,15 @@ class EmailBot:
         if youtube:
             digest += f"\n🎥 <b>YouTube ({len(youtube)})</b>\n"
             for i, v in enumerate(youtube, 1):
-                title   = esc(v.get('title', 'Unknown'))
-                url     = esc(v.get('url', ''))
-                summary = v.get('summary', '')
+                title    = esc(v.get('title', 'Unknown'))
+                url      = esc(v.get('url', ''))
+                summary  = v.get('summary', '')
                 one_line = esc(self._one_liner(summary)) if summary else ''
-                digest += f"  {i}. <a href=\"{url}\">{title}</a>\n"
+                source   = esc(v.get('source', ''))
+                digest += f"  {i}. <a href=\"{url}\">{title}</a>"
+                if source:
+                    digest += f"  <i>· {source}</i>"
+                digest += "\n"
                 if one_line:
                     digest += f"     ↳ {one_line}\n"
 
@@ -540,7 +557,11 @@ class EmailBot:
                 url      = esc(a.get('url', ''))
                 summary  = a.get('summary', '')
                 one_line = esc(self._one_liner(summary)) if summary else ''
-                digest += f"  {i}. <a href=\"{url}\">{title}</a>\n"
+                source   = esc(a.get('source', ''))
+                digest += f"  {i}. <a href=\"{url}\">{title}</a>"
+                if source:
+                    digest += f"  <i>· {source}</i>"
+                digest += "\n"
                 if one_line:
                     digest += f"     ↳ {one_line}\n"
 
@@ -552,7 +573,11 @@ class EmailBot:
                 stars    = r.get('stars', 0)
                 summary  = r.get('summary', '')
                 one_line = esc(self._one_liner(summary)) if summary else ''
-                digest += f"  {i}. <a href=\"{url}\">{name}</a>  ⭐{stars}\n"
+                source   = esc(r.get('source', ''))
+                digest += f"  {i}. <a href=\"{url}\">{name}</a>  ⭐{stars}"
+                if source:
+                    digest += f"  <i>· {source}</i>"
+                digest += "\n"
                 if one_line:
                     digest += f"     ↳ {one_line}\n"
 
@@ -570,6 +595,8 @@ class EmailBot:
         for video in youtube:
             block  = f"🎥 <b>{esc(video.get('title', 'Unknown'))}</b>\n"
             block += f"🔗 <a href=\"{esc(video['url'])}\">Watch on YouTube</a>\n"
+            if video.get('source'):
+                block += f"📌 <i>Source: {esc(video['source'])}</i>\n"
             if video.get('has_full_transcript'):
                 block += "<i>✅ Transcript sampled from full video</i>\n"
             block += "\n"
@@ -581,7 +608,10 @@ class EmailBot:
 
         for art in articles:
             block  = f"📰 <b>{esc(art.get('title', 'Untitled'))}</b>\n"
-            block += f"🔗 <a href=\"{esc(art['url'])}\">Read article</a>\n\n"
+            block += f"🔗 <a href=\"{esc(art['url'])}\">Read article</a>\n"
+            if art.get('source'):
+                block += f"📌 <i>Source: {esc(art['source'])}</i>\n"
+            block += "\n"
             if art.get('summary'):
                 block += esc(art['summary']) + "\n"
             if art.get('my_take'):
@@ -591,7 +621,10 @@ class EmailBot:
         for repo in github:
             name   = f"{repo['owner']}/{repo['repo']}"
             block  = f"🐙 <b>{esc(name)}</b>  ⭐ {repo.get('stars', 0)}\n"
-            block += f"🔗 <a href=\"{esc(repo['url'])}\">Open repo</a>\n\n"
+            block += f"🔗 <a href=\"{esc(repo['url'])}\">Open repo</a>\n"
+            if repo.get('source'):
+                block += f"📌 <i>Source: {esc(repo['source'])}</i>\n"
+            block += "\n"
             if repo.get('summary'):
                 block += esc(repo['summary']) + "\n"
             if repo.get('my_take'):
