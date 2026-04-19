@@ -36,7 +36,7 @@ class YouTubeExtractor:
     def extract_youtube_links(text: str) -> List[str]:
         """Extract all YouTube URLs from text"""
         patterns = [
-            r'https?://(?:www\.|m\.)?youtube\.com/watch\?v=[^\s&]+',
+            r'https?://(?:www\.|m\.)?youtube\.com/watch\?[^\s]+',
             r'https?://(?:www\.)?youtu\.be/[^\s?\s]+',
             r'https?://(?:www\.|m\.)?youtube\.com/embed/[^\s?]+',
             r'https?://(?:www\.|m\.)?youtube\.com/shorts/[^\s?]+',
