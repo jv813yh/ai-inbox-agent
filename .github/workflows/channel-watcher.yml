@@ -34,6 +34,7 @@ jobs:
       - name: Run Channel Watcher Bot
         env:
           CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY_GITHUB_EMAIL }}
+          CLAUDE_API_KEY_GITHUB_EMAIL: ${{ secrets.CLAUDE_API_KEY_GITHUB_EMAIL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}

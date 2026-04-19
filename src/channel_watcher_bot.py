@@ -39,7 +39,7 @@ from extractors_full import YouTubeExtractor
 CONFIG_PATH = Path(__file__).parent.parent / 'config' / 'watched_channels.yaml'
 STATE_FILE  = Path(__file__).parent / 'channel_state.json'
 
-client = Anthropic(api_key=os.getenv('CLAUDE_API_KEY'))
+client = Anthropic(api_key=os.getenv('CLAUDE_API_KEY') or os.getenv('CLAUDE_API_KEY_GITHUB_EMAIL'))
 
 RSS_NS = {
     'atom':  'http://www.w3.org/2005/Atom',
