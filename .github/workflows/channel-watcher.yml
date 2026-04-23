@@ -2,7 +2,7 @@ name: Channel Watcher
 
 on:
   schedule:
-    - cron: '0 21 * * *'   # 21:00 UTC daily — 1 hour after the email bot
+
   workflow_dispatch:        # Manual trigger for testing
 
 jobs:
