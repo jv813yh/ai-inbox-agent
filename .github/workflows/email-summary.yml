@@ -2,7 +2,7 @@ name: Email AI Summary
 
 on:
   schedule:
-    - cron: '0 20 * * *'  # 20:00 (8 PM) každý deň
+
   workflow_dispatch:      # Manuálne spustenie
 
 jobs:
