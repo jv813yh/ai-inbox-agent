@@ -2,7 +2,7 @@ name: AI Content Collector
 
 on:
   schedule:
-    - cron: '0 18 * * *'   # 18:00 UTC daily — runs 2 h before the summarizer (20:00 UTC)
+  
   workflow_dispatch:        # Manual trigger for testing
 
 jobs:
