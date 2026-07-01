@@ -19,11 +19,13 @@ from typing import Any, Iterable
 
 try:  # package import when tested as `src.server_runner`
     from .agentwiki_writer import AgentWikiWriter
+    from .content_classifier import classify_youtube_item
     from .gmail_api_client import GmailApiClient, GmailMessage
     from .state_store import StateStore
 except ImportError:  # script execution as `python src/server_runner.py`
     from agentwiki_writer import AgentWikiWriter
-    from gmail_api_client import GmailApiClient, GmailMessage
+    from content_classifier import classify_youtube_item
+    from gmail_api_client import GmailMessage, GmailApiClient
     from state_store import StateStore
 
 
@@ -167,6 +169,7 @@ def process_messages(
             youtube_items = ContentPreparator.prepare_youtube_batch(youtube_urls, email_body=msg.body)
             for item in youtube_items:
                 item.setdefault("video_id", source_id_for_youtube_url(str(item.get("url", ""))))
+                item.setdefault("classification", classify_youtube_item(item, email_text="\n".join([msg.subject, msg.body, msg.snippet])))
                 rel_path = writer.write_youtube_note(item, email_meta=msg.email_meta, gmail_account=gmail_account)
                 writer.upsert_youtube_index(item, rel_path)
                 store.record_source(
