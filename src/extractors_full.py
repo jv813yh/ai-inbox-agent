@@ -18,7 +18,13 @@ from bs4 import BeautifulSoup
 
 from prompt_builder import PromptBuilder
 
-client = Anthropic(api_key=os.getenv("CLAUDE_API_KEY_GITHUB_EMAIL"))
+client = Anthropic(
+    api_key=(
+        os.getenv("CLAUDE_API_KEY_GITHUB_EMAIL")
+        or os.getenv("CLAUDE_API_KEY")
+        or os.getenv("ANTHROPIC_API_KEY")
+    )
+)
 
 
 def _split_take(text: str) -> tuple[str, str]:
@@ -354,7 +360,37 @@ class GitHubExtractor:
         
         except Exception as e:
             print(f"  ❌ Error summarizing repo: {e}")
-            return None
+            topics = repo_info.get('topics', []) or []
+            topic_text = ", ".join(topics) if topics else "no listed topics"
+            fallback_summary = (
+                "📌 ONE-LINE SUMMARY: Fallback summary from GitHub metadata because LLM summarization failed.\n\n"
+                f"🎓 WHAT IS THIS PROJECT?\n"
+                f"{repo_info.get('owner', 'unknown')}/{repo_info.get('repo', 'unknown')} is a "
+                f"{repo_info.get('language', 'Unknown')} project. "
+                f"Description: {repo_info.get('description') or 'No description provided.'}\n\n"
+                f"💡 MAIN SIGNALS\n"
+                f"- Stars: {repo_info.get('stars', 0)}\n"
+                f"- Forks: {repo_info.get('forks', 0)}\n"
+                f"- Topics: {topic_text}\n\n"
+                "🚀 HOW TO USE THIS\n"
+                "Open the repository and review the README/source before deciding whether it is useful."
+            )
+            return {
+                'type': 'github_repo',
+                'url': repo_info.get('url', ''),
+                'owner': repo_info.get('owner', ''),
+                'repo': repo_info.get('repo', ''),
+                'description': repo_info.get('description', ''),
+                'stars': repo_info.get('stars', 0),
+                'forks': repo_info.get('forks', 0),
+                'language': repo_info.get('language', 'Unknown'),
+                'topics': topics,
+                'summary': fallback_summary,
+                'my_take': '🧠 MY TAKE: LLM summarization failed, so this note was saved with metadata-only analysis for follow-up.',
+                'readme_preview': repo_info.get('readme', '')[:500],
+                'processed_at': datetime.now().isoformat(),
+                'source': 'email'
+            }
 
 class WebArticleExtractor:
     """Fetch and summarize web articles linked in emails."""
