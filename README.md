@@ -114,6 +114,65 @@ latest_plain_email = PLAIN_EMAIL_V1
 
 ---
 
+## Server-local Hermes + AgentWiki mode
+
+Use this mode when the bot should read Jozef's `learning` Gmail account on the server and write durable notes into HumanAgentWiki/Obsidian.
+
+**Why local:** GitHub Actions cannot write to `/home/jozef/humanagentwiki/notes`, so AgentWiki persistence runs on the server via Hermes cron.
+
+### Entry point
+
+```bash
+python3 src/server_runner.py --dry-run --max-emails 3
+```
+
+Real run:
+
+```bash
+python3 src/server_runner.py --max-emails 5
+```
+
+### Defaults
+
+| Setting | Default |
+|---|---|
+| Gmail account | `learning` |
+| OAuth token | `/home/jozef/.hermes/google_accounts/learning/google_token.json` |
+| Gmail query | `in:inbox is:unread newer_than:30d (youtube OR youtu.be OR github.com OR subject:YouTube OR subject:GitHub)` |
+| HumanAgentWiki notes | `/home/jozef/humanagentwiki/notes` |
+| State DB | `/home/jozef/.hermes/state/ai-inbox-agent/processed.sqlite` |
+
+### Behavior
+
+- Reads only unread matching Gmail messages.
+- Processes YouTube and GitHub links.
+- Writes Markdown notes into:
+  - `Videos/`
+  - `GitHub Projects/`
+  - `Indexes/`
+- Maintains a local SQLite dedupe store so repeated links are not processed again.
+- Runs the HumanAgentWiki indexer after successful note writes.
+- Marks email as read only after successful processing.
+- Prints a Telegram-ready digest to stdout for Hermes cron delivery.
+
+### Hermes cron wrapper
+
+Server wrapper:
+
+```bash
+/home/jozef/.hermes/scripts/ai_inbox_learning_agent.sh
+```
+
+Recommended cron schedule after manual dry-run validation:
+
+```text
+every 2h
+```
+
+Do not create/push/merge GitHub changes or create cron jobs without Jozef confirmation.
+
+---
+
 ## Known Issues & Notes
 
 - **YouTube on CI:** yt-dlp is blocked by YouTube bot detection on GitHub Actions IPs. Transcripts use `youtube-transcript-api` instead. If a video has no captions, Claude summarizes using title + description only.

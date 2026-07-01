@@ -1,3 +1,6 @@
 /venv
-
-/src/__pycache__
+/.venv
+/.hermes/
+__pycache__/
+*/__pycache__/
+*.py[cod]
