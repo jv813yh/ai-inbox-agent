@@ -24,6 +24,16 @@ class AgentWikiWriterTests(unittest.TestCase):
                 "has_full_transcript": True,
                 "transcript_preview": "hello transcript",
                 "processed_at": "2026-07-01T12:00:00+00:00",
+                "classification": {
+                    "domain": "Technologie",
+                    "topic": "AI Agents",
+                    "channel_name": "Agent Lab",
+                    "channel_slug": "agent-lab",
+                    "dataset_use": "rag",
+                    "source_type": "youtube",
+                    "method": "known_channel_map",
+                    "confidence": 0.95,
+                },
             }
             email_meta = {
                 "from": "sender@example.com",
@@ -36,18 +46,61 @@ class AgentWikiWriterTests(unittest.TestCase):
             note_path = notes_dir / rel_path
 
             self.assertTrue(note_path.exists())
+            self.assertTrue(rel_path.startswith("YouTube/Technologie/Agent Lab/"))
             text = note_path.read_text(encoding="utf-8")
-            self.assertIn("category: Videos", text)
+            self.assertIn("category: YouTube", text)
+            self.assertIn("domain: Technologie", text)
+            self.assertIn("topic: AI Agents", text)
+            self.assertIn("channel_slug: agent-lab", text)
+            self.assertIn("dataset_use: rag", text)
+            self.assertIn("source_type: youtube", text)
             self.assertIn("type: youtube_video", text)
             self.assertIn("source_url: \"https://www.youtube.com/watch?v=abc123xyz00\"", text)
             self.assertIn("## Summary", text)
             self.assertIn("## My take", text)
-            self.assertIn("[[YouTube Video Index]]", text)
+            self.assertIn("[[YouTube Technologie Index]]", text)
 
             writer.upsert_youtube_index(item, rel_path)
             writer.upsert_youtube_index(item, rel_path)
-            index_text = (notes_dir / "Indexes" / "youtube-video-index.md").read_text(encoding="utf-8")
+            index_text = (notes_dir / "Indexes" / "youtube-technologie-index.md").read_text(encoding="utf-8")
             self.assertEqual(index_text.count("Building Safe AI Agents"), 1)
+
+    def test_writes_investment_youtube_note_under_channel_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            notes_dir = Path(tmp)
+            writer = AgentWikiWriter(notes_dir)
+            item = {
+                "url": "https://www.youtube.com/watch?v=inv123xyz00",
+                "video_id": "inv123xyz00",
+                "title": "ETF portfolio pre zaciatocnikov",
+                "channel": "Kapitalista",
+                "summary": "Investicne zhrnutie.",
+                "my_take": "Pouzitelne pre osobne poznamky.",
+                "has_full_transcript": True,
+                "transcript_preview": "ETF a dlhodobe investovanie",
+                "processed_at": "2026-07-01T12:00:00+00:00",
+                "classification": {
+                    "domain": "Investovanie",
+                    "topic": "ETF",
+                    "channel_name": "Kapitalista",
+                    "channel_slug": "kapitalista",
+                    "dataset_use": "rag",
+                    "source_type": "youtube",
+                    "method": "known_channel_map",
+                    "confidence": 0.95,
+                },
+            }
+            email_meta = {"from": "sender@example.com", "subject": "YouTube investovanie", "date": "today", "message_id": "msg-invest"}
+
+            rel_path = writer.write_youtube_note(item, email_meta=email_meta, gmail_account="learning")
+            self.assertTrue(rel_path.startswith("YouTube/Investovanie/Kapitalista/"))
+            text = (notes_dir / rel_path).read_text(encoding="utf-8")
+            self.assertIn("domain: Investovanie", text)
+            self.assertIn("topic: ETF", text)
+
+            writer.upsert_youtube_index(item, rel_path)
+            index_text = (notes_dir / "Indexes" / "youtube-investovanie-index.md").read_text(encoding="utf-8")
+            self.assertIn("ETF portfolio pre zaciatocnikov", index_text)
 
     def test_writes_github_note_and_idempotent_index_entry(self):
         with tempfile.TemporaryDirectory() as tmp:

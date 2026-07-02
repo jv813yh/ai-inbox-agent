@@ -146,10 +146,14 @@ python3 src/server_runner.py --max-emails 5
 
 - Reads only unread matching Gmail messages.
 - Processes YouTube and GitHub links.
-- Writes Markdown notes into:
-  - `Videos/`
+- Writes GitHub Markdown notes into:
   - `GitHub Projects/`
-  - `Indexes/`
+- Writes YouTube Markdown notes into topic/channel folders for later RAG/fine-tuning use:
+  - `YouTube/Investovanie/<channel>/`
+  - `YouTube/Technologie/<channel>/`
+  - `YouTube/Ostatne/<channel>/`
+- Adds RAG-friendly frontmatter metadata such as `domain`, `topic`, `channel_slug`, `dataset_use`, and `source_type`.
+- Maintains per-domain YouTube index notes such as `Indexes/youtube-investovanie-index.md` and `Indexes/youtube-technologie-index.md`.
 - Maintains a local SQLite dedupe store so repeated links are not processed again.
 - Runs the HumanAgentWiki indexer after successful note writes.
 - Marks email as read only after successful processing.

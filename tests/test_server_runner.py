@@ -128,6 +128,46 @@ class ServerRunnerRoutingTests(unittest.TestCase):
         self.assertEqual(successful_ids, ["msg-dupe-video"])
         self.assertIn("One Video", digest)
 
+    def test_process_messages_classifies_youtube_items_before_writing_notes(self):
+        class FakeContentPreparator:
+            @staticmethod
+            def prepare_youtube_batch(urls, email_body=""):
+                return [
+                    {
+                        "url": urls[0],
+                        "video_id": "inv123xyz00",
+                        "title": "ETF portfolio pre zaciatocnikov",
+                        "channel": "Kapitalista",
+                        "summary": "summary",
+                        "my_take": "take",
+                        "has_full_transcript": True,
+                        "transcript_preview": "ETF a akcie",
+                        "processed_at": "2026-07-01T07:00:00+00:00",
+                    }
+                ]
+
+            @staticmethod
+            def prepare_github_batch(urls):
+                return []
+
+        with tempfile.TemporaryDirectory() as tmp, patch("src.server_runner._lazy_content_preparator", return_value=FakeContentPreparator):
+            root = Path(tmp)
+            msg = GmailMessage(
+                id="msg-invest-video",
+                thread_id="thread-1",
+                subject="YouTube investovanie",
+                from_addr="sender@example.com",
+                date="today",
+                body="https://youtu.be/inv123xyz00",
+            )
+
+            digest, successful_ids = process_messages([msg], notes_dir=root / "notes", state_db=root / "state.sqlite")
+            notes = list((root / "notes" / "YouTube" / "Investovanie" / "Kapitalista").glob("*.md"))
+
+        self.assertEqual(successful_ids, ["msg-invest-video"])
+        self.assertEqual(len(notes), 1)
+        self.assertIn("YouTube/Investovanie/Kapitalista/", digest)
+
     def test_process_messages_marks_duplicate_only_email_successful_with_skipped_status(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

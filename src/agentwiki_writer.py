@@ -7,6 +7,11 @@ import re
 from pathlib import Path
 from typing import Any, Mapping
 
+try:
+    from .content_classifier import classify_youtube_item, folder_parts_for_youtube
+except ImportError:
+    from content_classifier import classify_youtube_item, folder_parts_for_youtube
+
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
@@ -74,6 +79,13 @@ class AgentWikiWriter:
             f"Message-ID: {email_meta.get('message_id', '')}"
         )
 
+    @staticmethod
+    def _youtube_classification(item: Mapping[str, Any]) -> Mapping[str, Any]:
+        existing = item.get("classification")
+        if isinstance(existing, Mapping):
+            return existing
+        return classify_youtube_item(item)
+
     def write_youtube_note(
         self,
         item: Mapping[str, Any],
@@ -84,17 +96,29 @@ class AgentWikiWriter:
         title = str(item.get("title") or item.get("url") or "YouTube Video")
         video_id = str(item.get("video_id") or self._video_id_from_url(str(item.get("url", ""))) or slugify(title))
         date_prefix = str(item.get("processed_at", ""))[:10] or "undated"
-        rel_path = f"Videos/{date_prefix}--{slugify(video_id)}--{slugify(title)}.md"
+        classification = self._youtube_classification(item)
+        folder = "/".join(folder_parts_for_youtube(classification))
+        rel_path = f"{folder}/{date_prefix}--{slugify(video_id)}--{slugify(title)}.md"
+        domain = str(classification.get("domain") or "Ostatne")
+        topic = str(classification.get("topic") or domain)
+        channel_name = str(classification.get("channel_name") or item.get("channel") or "Unknown Channel")
 
         front = _frontmatter(
             {
                 "title": title,
-                "category": "Videos",
+                "category": "YouTube",
+                "domain": domain,
+                "topic": topic,
                 "type": "youtube_video",
-                "tags": ["youtube", "video", "ai-inbox", "learning-gmail"],
+                "tags": ["youtube", "video", "ai-inbox", "learning-gmail", domain],
                 "source_url": item.get("url", ""),
+                "source_type": classification.get("source_type", "youtube"),
                 "video_id": video_id,
-                "channel": item.get("channel", ""),
+                "channel": channel_name,
+                "channel_slug": classification.get("channel_slug", "unknown-channel"),
+                "dataset_use": classification.get("dataset_use", "rag"),
+                "classification_method": classification.get("method", "fallback"),
+                "classification_confidence": classification.get("confidence", 0),
                 "gmail_account": gmail_account,
                 "gmail_message_id": email_meta.get("message_id", ""),
                 "processed_at": item.get("processed_at", ""),
@@ -114,15 +138,31 @@ Email source:
 ## My take
 {item.get('my_take', '').strip()}
 
+## Key points
+
+## Entities
+
+## Claims
+
+## Actionable ideas
+
 ## Key metadata
-- Channel: {item.get('channel', '')}
+- Domain: {domain}
+- Topic: {topic}
+- Channel: {channel_name}
 - Transcript available: {'yes' if item.get('has_full_transcript') else 'no'}
+
+## Source metadata
+- Source type: youtube
+- Dataset use: {classification.get('dataset_use', 'rag')}
+- Classification method: {classification.get('method', 'fallback')}
+- Classification confidence: {classification.get('confidence', 0)}
 
 ## Transcript preview
 {item.get('transcript_preview', '').strip()}
 
 ## Related
-- [[YouTube Video Index]]
+- [[YouTube {domain} Index]]
 - [[Learning Gmail Inbox]]
 """
         return self._write_note(rel_path, front + "\n\n" + body)
@@ -190,8 +230,19 @@ Email source:
 
     def upsert_youtube_index(self, item: Mapping[str, Any], rel_note_path: str) -> str:
         title = str(item.get("title") or item.get("url") or "YouTube Video")
-        entry = f"- [[{title}]] — {item.get('channel', 'Unknown')} — {item.get('url', '')} — `{rel_note_path}`"
-        return self._upsert_index("Indexes/youtube-video-index.md", "YouTube Video Index", ["index", "youtube", "ai-inbox"], entry)
+        classification = self._youtube_classification(item)
+        domain = str(classification.get("domain") or "Ostatne")
+        topic = str(classification.get("topic") or domain)
+        channel_name = str(classification.get("channel_name") or item.get("channel") or "Unknown Channel")
+        entry = f"- [[{title}]] — {channel_name} — {topic} — {item.get('url', '')} — `{rel_note_path}`"
+        domain_index = self._upsert_index(
+            f"Indexes/youtube-{slugify(domain)}-index.md",
+            f"YouTube {domain} Index",
+            ["index", "youtube", "ai-inbox", domain],
+            entry,
+        )
+        self._upsert_index("Indexes/youtube-video-index.md", "YouTube Video Index", ["index", "youtube", "ai-inbox"], entry)
+        return domain_index
 
     def upsert_github_index(self, item: Mapping[str, Any], rel_note_path: str) -> str:
         name = f"{item.get('owner', 'unknown')}/{item.get('repo', 'unknown')}"
