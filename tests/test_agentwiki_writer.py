@@ -65,6 +65,67 @@ class AgentWikiWriterTests(unittest.TestCase):
             index_text = (notes_dir / "Indexes" / "youtube-technologie-index.md").read_text(encoding="utf-8")
             self.assertEqual(index_text.count("Building Safe AI Agents"), 1)
 
+    def test_writes_youtube_note_populates_structured_sections_from_summary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            notes_dir = Path(tmp)
+            writer = AgentWikiWriter(notes_dir)
+            item = {
+                "url": "https://www.youtube.com/watch?v=ship1234567",
+                "video_id": "ship1234567",
+                "title": "Multi-Agent Architecture That Ships",
+                "channel": "Factory",
+                "summary": """🎬 INTRO
+A useful production multi-agent architecture talk.
+
+🔑 KEY TAKEAWAYS
+- Validation contracts are essential for reliable agents.
+- Serial execution can beat naive parallelism when context matters.
+
+🚀 HOW TO APPLY THIS IN PRACTICE
+- Define orchestrator, worker, and validator roles before coding.
+- Add concrete validation contracts for each agent task.
+
+🧩 ENTITIES
+- Factory: company building software engineering agents.
+- Luke Alvoeiro: presenter of the architecture.
+
+📣 CLAIMS
+- Validation contracts reduce drift in long-running agent workflows.
+- Per-role model selection improves cost and quality.
+
+💼 ACTIONABLE IDEAS
+- Build a small validator library for agent workflows.
+- Track model quality per agent role.
+
+🧠 MY TAKE:
+Validation infrastructure is the practical wedge.
+""",
+                "has_full_transcript": False,
+                "processed_at": "2026-07-04T12:00:00+00:00",
+                "classification": {
+                    "domain": "Technologie",
+                    "topic": "AI Agents",
+                    "channel_name": "Factory",
+                    "channel_slug": "factory",
+                    "dataset_use": "rag",
+                    "source_type": "youtube",
+                    "method": "keyword_rule",
+                    "confidence": 0.8,
+                },
+            }
+            email_meta = {"from": "sender@example.com", "subject": "agents", "date": "today", "message_id": "msg-structured"}
+
+            rel_path = writer.write_youtube_note(item, email_meta=email_meta, gmail_account="learning")
+            text = (notes_dir / rel_path).read_text(encoding="utf-8")
+
+            self.assertIn("## Key points\n- Validation contracts are essential", text)
+            self.assertIn("## Entities\n- Factory: company building software engineering agents.", text)
+            self.assertIn("## Claims\n- Validation contracts reduce drift", text)
+            self.assertIn("## Actionable ideas\n- Build a small validator library", text)
+            self.assertNotIn("## Key points\n\n## Entities", text)
+            self.assertNotIn("## Entities\n\n## Claims", text)
+            self.assertNotIn("## Claims\n\n## Actionable ideas", text)
+
     def test_writes_investment_youtube_note_under_channel_folder(self):
         with tempfile.TemporaryDirectory() as tmp:
             notes_dir = Path(tmp)

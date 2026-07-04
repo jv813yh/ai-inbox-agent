@@ -49,6 +49,101 @@ def _frontmatter(fields: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+_YOUTUBE_SUMMARY_HEADERS = {
+    "INTRO",
+    "WHAT IS THIS VIDEO ABOUT",
+    "MAIN LEARNING OBJECTIVES",
+    "DETAILED NOTES",
+    "KEY TAKEAWAYS",
+    "HOW TO APPLY THIS IN PRACTICE",
+    "ACTIONABLE IDEAS",
+    "MY TAKE",
+    "ANALOGIES AND EXAMPLES",
+    "CLAIMS",
+    "CONNECTIONS TO OTHER CONCEPTS",
+    "ENTITIES",
+    "QUESTIONS TO REFLECT ON",
+    "RELEVANCE FOR MODERN DEVELOPERS",
+    "FURTHER READING",
+}
+
+
+def _normalize_summary_header(line: str) -> str:
+    text = re.sub(r"^[^A-Za-z0-9]+", "", line.strip())
+    text = text.rstrip(":").strip()
+    text = re.sub(r"[^A-Za-z0-9 ]+", " ", text).upper()
+    return " ".join(text.split())
+
+
+def _extract_summary_section(summary: str, *headers: str) -> str:
+    targets = {_normalize_summary_header(header) for header in headers}
+    lines = summary.splitlines()
+    collecting = False
+    collected: list[str] = []
+    for line in lines:
+        normalized = _normalize_summary_header(line)
+        is_known_header = normalized in _YOUTUBE_SUMMARY_HEADERS
+        if normalized in targets:
+            collecting = True
+            continue
+        if collecting and is_known_header:
+            break
+        if collecting:
+            collected.append(line.rstrip())
+    return "\n".join(collected).strip()
+
+
+def _first_non_empty_lines(text: str, *, limit: int = 3) -> str:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    selected = lines[:limit]
+    if all(line.startswith(("- ", "1.", "2.", "3.")) for line in selected):
+        return "\n".join(selected)
+    return "\n".join(f"- {line.lstrip('- ').strip()}" for line in selected)
+
+
+def _youtube_structured_sections(item: Mapping[str, Any], classification: Mapping[str, Any]) -> Mapping[str, str]:
+    summary = str(item.get("summary") or "")
+    title = str(item.get("title") or "YouTube video")
+    channel = str(classification.get("channel_name") or item.get("channel") or "Unknown Channel")
+    domain = str(classification.get("domain") or "Ostatne")
+    topic = str(classification.get("topic") or domain)
+
+    my_take = str(item.get("my_take") or "").strip() or _extract_summary_section(summary, "MY TAKE")
+    key_points = (
+        _extract_summary_section(summary, "KEY TAKEAWAYS")
+        or _extract_summary_section(summary, "MAIN LEARNING OBJECTIVES")
+        or _first_non_empty_lines(summary, limit=3)
+        or "- See the Summary section above for the main learning points."
+    )
+    actionable = (
+        _extract_summary_section(summary, "ACTIONABLE IDEAS")
+        or _extract_summary_section(summary, "HOW TO APPLY THIS IN PRACTICE")
+        or _extract_summary_section(summary, "FURTHER READING")
+        or "- Turn the strongest idea from the summary into a small experiment or checklist.\n- Save follow-up links or tools mentioned in the video as separate AgentWiki notes."
+    )
+
+    # Keep these sections lightweight and deterministic. They make notes useful for
+    # RAG even when the LLM summary did not return explicit entity/claim fields.
+    explicit_entities = _extract_summary_section(summary, "ENTITIES")
+    entities = explicit_entities or "\n".join(
+        f"- {value}"
+        for value in [title, channel, domain, topic]
+        if value and value != "Unknown"
+    )
+    claims_source = _extract_summary_section(summary, "CLAIMS") or key_points or summary
+    claims = _first_non_empty_lines(claims_source, limit=3) or "- No explicit claims extracted; rely on the Summary section."
+
+    return {
+        "my_take": my_take or "- No separate take extracted; see Summary for the main interpretation.",
+        "key_points": key_points,
+        "entities": entities,
+        "claims": claims,
+        "actionable_ideas": actionable,
+    }
+
+
 class AgentWikiWriter:
     """Safe writer for HumanAgentWiki Markdown notes and index notes."""
 
@@ -106,6 +201,7 @@ class AgentWikiWriter:
         domain = str(classification.get("domain") or "Ostatne")
         topic = str(classification.get("topic") or domain)
         channel_name = str(classification.get("channel_name") or item.get("channel") or "Unknown Channel")
+        sections = _youtube_structured_sections(item, classification)
 
         front = _frontmatter(
             {
@@ -140,15 +236,19 @@ Email source:
 {item.get('summary', '').strip()}
 
 ## My take
-{item.get('my_take', '').strip()}
+{sections['my_take']}
 
 ## Key points
+{sections['key_points']}
 
 ## Entities
+{sections['entities']}
 
 ## Claims
+{sections['claims']}
 
 ## Actionable ideas
+{sections['actionable_ideas']}
 
 ## Key metadata
 - Domain: {domain}
