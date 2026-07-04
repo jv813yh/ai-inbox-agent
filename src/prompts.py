@@ -145,6 +145,23 @@ Thorough explanation of the key points from this part.
 🚀 HOW TO APPLY THIS IN PRACTICE
 Concrete ways to use this knowledge in a real project.
 
+🧩 ENTITIES
+List important people, companies, tools, technologies, frameworks, or projects mentioned.
+- Entity 1: why it matters
+- Entity 2: why it matters
+
+📣 CLAIMS
+List the main claims or assertions from the video. Keep them concrete and falsifiable where possible.
+- Claim 1
+- Claim 2
+- Claim 3
+
+💼 ACTIONABLE IDEAS
+List practical ideas Jozef could apply, test, build, automate, or save for later.
+- Actionable idea 1
+- Actionable idea 2
+- Actionable idea 3
+
 🧠 MY TAKE:
 2-3 sentences sharing what you personally find most interesting or exciting, \
 and where you see the biggest potential or opportunity.\
