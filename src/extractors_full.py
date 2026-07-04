@@ -16,7 +16,10 @@ from yt_dlp import YoutubeDL
 from youtube_transcript_api import YouTubeTranscriptApi
 from bs4 import BeautifulSoup
 
-from prompt_builder import PromptBuilder
+try:
+    from .prompt_builder import PromptBuilder
+except ImportError:
+    from prompt_builder import PromptBuilder
 
 client = Anthropic(
     api_key=(
@@ -486,7 +489,6 @@ class WebArticleExtractor:
     def summarize_article(article_data: Dict) -> Optional[Dict]:
         """Summarize an article with Claude."""
         try:
-            from prompt_builder import PromptBuilder
             prompt = PromptBuilder.article(
                 article_data['title'],
                 article_data['url'],
@@ -585,6 +587,47 @@ class ContentPreparator:
         
         return results
     
+    @staticmethod
+    def prepare_article_batch(urls: List[str], *, max_per_email: int = 5) -> List[Dict]:
+        """Process generic web article URLs."""
+        results = []
+        for url in urls[:max_per_email]:
+            print(f"\n📰 Processing article: {url}")
+            article = WebArticleExtractor.fetch_article(url)
+            if not article:
+                print(f"❌ Could not fetch article: {url}")
+                continue
+            summary = WebArticleExtractor.summarize_article(article)
+            if summary:
+                results.append(summary)
+                print(f"✅ Processed article: {summary.get('title', 'Unknown')}")
+        return results
+
+    @staticmethod
+    def prepare_plain_email(subject: str, from_addr: str, body: str) -> Optional[Dict]:
+        """Summarize a useful plain email with Claude."""
+        try:
+            print(f"\n✉️ Processing plain email: {subject[:80]}")
+            prompt = PromptBuilder.plain_email(subject=subject, from_addr=from_addr, body=body[:5000])
+            response = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=1000,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            intro, my_take = _split_take(response.content[0].text)
+            return {
+                'type': 'plain_email',
+                'subject': subject,
+                'from_addr': from_addr,
+                'summary': intro,
+                'my_take': my_take,
+                'processed_at': datetime.now().isoformat(),
+                'source': 'email',
+            }
+        except Exception as e:
+            print(f"  ❌ Error summarizing plain email: {e}")
+            return None
+
     @staticmethod
     def format_for_storage(content_data: Dict) -> str:
         """Format content data as JSON for storage"""

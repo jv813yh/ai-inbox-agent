@@ -4,11 +4,27 @@ from pathlib import Path
 from unittest.mock import patch
 
 from src.gmail_api_client import GmailMessage
-from src.server_runner import classify_links, process_messages, source_id_for_github_url, source_id_for_youtube_url
+from src.server_runner import (
+    DEFAULT_QUERY,
+    classify_links,
+    process_messages,
+    source_id_for_article_url,
+    source_id_for_github_url,
+    source_id_for_youtube_url,
+)
 from src.state_store import StateStore
 
 
 class ServerRunnerRoutingTests(unittest.TestCase):
+    def test_default_query_fetches_linked_unread_email_without_full_inbox_sweep(self):
+        self.assertIn("in:inbox", DEFAULT_QUERY)
+        self.assertIn("is:unread", DEFAULT_QUERY)
+        self.assertIn("github.com", DEFAULT_QUERY)
+        self.assertIn("article", DEFAULT_QUERY)
+        self.assertIn("newsletter", DEFAULT_QUERY)
+        self.assertNotIn("http OR https", DEFAULT_QUERY)
+        self.assertNotEqual(DEFAULT_QUERY, "in:inbox is:unread newer_than:30d")
+
     def test_classifies_youtube_and_github_links_from_email_body(self):
         body = """
         Watch https://www.youtube.com/watch?v=abc123xyz00&feature=share
@@ -21,10 +37,31 @@ class ServerRunnerRoutingTests(unittest.TestCase):
         self.assertIn("https://www.youtube.com/watch?v=abc123xyz00&feature=share", links.youtube)
         self.assertEqual(links.github, ["https://github.com/jv813yh/ai-inbox-agent"])
 
+    def test_classifies_article_links_excluding_youtube_github_and_assets(self):
+        body = """
+        Read https://example.com/blog/post?utm_source=newsletter#section
+        and https://arxiv.org/abs/1234.5678.
+        Watch https://www.youtube.com/watch?v=abc123xyz00
+        Repo https://github.com/jv813yh/ai-inbox-agent
+        Ignore asset https://example.com/pixel.gif and unsubscribe https://newsletter.example.com/unsubscribe?id=1
+        """
+        links = classify_links(body)
+
+        self.assertIn("https://example.com/blog/post?utm_source=newsletter#section", links.articles)
+        self.assertIn("https://arxiv.org/abs/1234.5678", links.articles)
+        self.assertFalse(any("youtube" in u or "github.com" in u for u in links.articles))
+        self.assertFalse(any("pixel.gif" in u or "unsubscribe" in u for u in links.articles))
+
     def test_source_ids_are_stable_for_dedupe(self):
         self.assertEqual(source_id_for_youtube_url("https://youtu.be/abc123xyz00?t=12"), "abc123xyz00")
         self.assertEqual(source_id_for_youtube_url("https://youtube.com/watch?feature=share&v=abc123xyz00"), "abc123xyz00")
         self.assertEqual(source_id_for_github_url("https://github.com/jv813yh/ai-inbox-agent/issues/1"), "jv813yh/ai-inbox-agent")
+
+    def test_source_id_for_article_url_strips_tracking_params_and_fragment(self):
+        cleaned = source_id_for_article_url("https://example.com/post?utm_source=x&ref=newsletter&id=42#comments")
+
+        self.assertEqual(cleaned, "https://example.com/post?id=42")
+
     def test_dry_run_does_not_create_state_db_or_notes(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -167,6 +204,242 @@ class ServerRunnerRoutingTests(unittest.TestCase):
         self.assertEqual(successful_ids, ["msg-invest-video"])
         self.assertEqual(len(notes), 1)
         self.assertIn("YouTube/Investovanie/Kapitalista/", digest)
+
+
+    def test_process_messages_routes_article_links_and_writes_notes(self):
+        class FakeContentPreparator:
+            seen_urls = []
+
+            @staticmethod
+            def prepare_youtube_batch(urls, email_body=""):
+                return []
+
+            @staticmethod
+            def prepare_github_batch(urls):
+                return []
+
+            @staticmethod
+            def prepare_article_batch(urls, **kwargs):
+                FakeContentPreparator.seen_urls = list(urls)
+                return [
+                    {
+                        "type": "web_article",
+                        "url": urls[0],
+                        "title": "Useful Article",
+                        "summary": "Article summary",
+                        "my_take": "Useful for backend automation.",
+                        "processed_at": "2026-07-04T10:00:00+00:00",
+                    }
+                ]
+
+        with tempfile.TemporaryDirectory() as tmp, patch("src.server_runner._lazy_content_preparator", return_value=FakeContentPreparator):
+            root = Path(tmp)
+            msg = GmailMessage(
+                id="msg-article",
+                thread_id="thread-1",
+                subject="Interesting article",
+                from_addr="sender@example.com",
+                date="today",
+                body="Read https://example.com/blog/useful?utm_source=newsletter",
+            )
+
+            digest, successful_ids = process_messages([msg], notes_dir=root / "notes", state_db=root / "state.sqlite")
+            notes = list((root / "notes" / "Web Articles" / "example-com").glob("*.md"))
+
+        self.assertEqual(successful_ids, ["msg-article"])
+        self.assertEqual(FakeContentPreparator.seen_urls, ["https://example.com/blog/useful?utm_source=newsletter"])
+        self.assertEqual(len(notes), 1)
+        self.assertIn("Useful Article", digest)
+
+    def test_process_messages_dedupes_article_links_by_canonical_url(self):
+        class FakeContentPreparator:
+            called = False
+
+            @staticmethod
+            def prepare_youtube_batch(urls, email_body=""):
+                return []
+
+            @staticmethod
+            def prepare_github_batch(urls):
+                return []
+
+            @staticmethod
+            def prepare_article_batch(urls, **kwargs):
+                FakeContentPreparator.called = True
+                return []
+
+        with tempfile.TemporaryDirectory() as tmp, patch("src.server_runner._lazy_content_preparator", return_value=FakeContentPreparator):
+            root = Path(tmp)
+            state_db = root / "state.sqlite"
+            store = StateStore(state_db)
+            store.record_source(
+                source_type="article",
+                source_id="https://example.com/blog/useful?id=42",
+                source_url="https://example.com/blog/useful?id=42",
+                note_path="Web Articles/example-com/existing.md",
+                first_seen_message_id="old-msg",
+            )
+            msg = GmailMessage(
+                id="msg-article-dupe",
+                thread_id="thread-1",
+                subject="Duplicate article",
+                from_addr="sender@example.com",
+                date="today",
+                body="Read https://example.com/blog/useful?id=42&utm_source=newsletter#top",
+            )
+
+            digest, successful_ids = process_messages([msg], notes_dir=root / "notes", state_db=state_db)
+
+        self.assertEqual(successful_ids, ["msg-article-dupe"])
+        self.assertFalse(FakeContentPreparator.called)
+        self.assertIn("skipped duplicate", digest.lower())
+
+    def test_process_messages_already_state_recorded_unread_email_is_returned_for_mark_read_recovery(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state_db = root / "state.sqlite"
+            store = StateStore(state_db)
+            store.record_message(
+                gmail_account="learning",
+                gmail_message_id="msg-already-processed",
+                thread_id="thread-1",
+                subject="Already processed but unread",
+                from_addr="sender@example.com",
+                status="processed",
+            )
+            msg = GmailMessage(
+                id="msg-already-processed",
+                thread_id="thread-1",
+                subject="Already processed but unread",
+                from_addr="sender@example.com",
+                date="today",
+                body="https://example.com/blog/useful",
+            )
+
+            digest, successful_ids = process_messages([msg], notes_dir=root / "notes", state_db=state_db)
+
+        self.assertEqual(successful_ids, ["msg-already-processed"])
+        self.assertIn("already handled email", digest.lower())
+
+    def test_process_messages_records_failed_link_processing_to_avoid_infinite_retry(self):
+        class FakeContentPreparator:
+            @staticmethod
+            def prepare_youtube_batch(urls, email_body=""):
+                return []
+
+            @staticmethod
+            def prepare_github_batch(urls):
+                return []
+
+            @staticmethod
+            def prepare_article_batch(urls, **kwargs):
+                return []
+
+        with tempfile.TemporaryDirectory() as tmp, patch("src.server_runner._lazy_content_preparator", return_value=FakeContentPreparator):
+            root = Path(tmp)
+            state_db = root / "state.sqlite"
+            store = StateStore(state_db)
+            msg = GmailMessage(
+                id="msg-article-fail",
+                thread_id="thread-1",
+                subject="Broken article",
+                from_addr="sender@example.com",
+                date="today",
+                body="Read https://example.com/broken-article",
+            )
+
+            digest, successful_ids = process_messages([msg], notes_dir=root / "notes", state_db=state_db)
+            with store._connect() as conn:
+                row = conn.execute(
+                    "select status from processed_messages where gmail_account=? and gmail_message_id=?",
+                    ("learning", "msg-article-fail"),
+                ).fetchone()
+
+        self.assertEqual(successful_ids, ["msg-article-fail"])
+        self.assertEqual(row[0], "skipped_failed_processing")
+        self.assertIn("failed processing", digest.lower())
+
+    def test_process_messages_plain_email_skipped_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            msg = GmailMessage(
+                id="msg-plain",
+                thread_id="thread-1",
+                subject="Long useful email",
+                from_addr="sender@example.com",
+                date="today",
+                body="This is a long useful email. " * 20,
+            )
+
+            digest, successful_ids = process_messages([msg], notes_dir=root / "notes", state_db=root / "state.sqlite")
+
+        self.assertEqual(digest, "")
+        self.assertEqual(successful_ids, [])
+
+    def test_process_messages_plain_email_processed_when_enabled(self):
+        class FakeContentPreparator:
+            @staticmethod
+            def prepare_plain_email(subject, from_addr, body):
+                return {
+                    "type": "plain_email",
+                    "subject": subject,
+                    "from_addr": from_addr,
+                    "summary": "Email summary",
+                    "my_take": "Follow up later.",
+                    "processed_at": "2026-07-04T10:00:00+00:00",
+                }
+
+        with tempfile.TemporaryDirectory() as tmp, patch("src.server_runner._lazy_content_preparator", return_value=FakeContentPreparator):
+            root = Path(tmp)
+            msg = GmailMessage(
+                id="msg-plain-enabled",
+                thread_id="thread-1",
+                subject="Long useful email",
+                from_addr="sender@example.com",
+                date="today",
+                body="This is a long useful email about AI systems. " * 20,
+            )
+
+            digest, successful_ids = process_messages(
+                [msg], notes_dir=root / "notes", state_db=root / "state.sqlite", include_plain_emails=True
+            )
+            notes = list((root / "notes" / "Emails" / "2026-07").glob("*.md"))
+
+        self.assertEqual(successful_ids, ["msg-plain-enabled"])
+        self.assertEqual(len(notes), 1)
+        self.assertIn("Long useful email", digest)
+
+    def test_process_messages_records_failed_plain_email_processing_to_avoid_infinite_retry(self):
+        class FakeContentPreparator:
+            @staticmethod
+            def prepare_plain_email(subject, from_addr, body):
+                return None
+
+        with tempfile.TemporaryDirectory() as tmp, patch("src.server_runner._lazy_content_preparator", return_value=FakeContentPreparator):
+            root = Path(tmp)
+            state_db = root / "state.sqlite"
+            store = StateStore(state_db)
+            msg = GmailMessage(
+                id="msg-plain-fail",
+                thread_id="thread-1",
+                subject="Long useful email",
+                from_addr="sender@example.com",
+                date="today",
+                body="This is a long useful email about AI systems. " * 20,
+            )
+
+            digest, successful_ids = process_messages(
+                [msg], notes_dir=root / "notes", state_db=state_db, include_plain_emails=True
+            )
+            with store._connect() as conn:
+                row = conn.execute(
+                    "select status from processed_messages where gmail_account=? and gmail_message_id=?",
+                    ("learning", "msg-plain-fail"),
+                ).fetchone()
+
+        self.assertEqual(successful_ids, ["msg-plain-fail"])
+        self.assertEqual(row[0], "skipped_failed_processing")
+        self.assertIn("failed processing", digest.lower())
 
     def test_process_messages_marks_duplicate_only_email_successful_with_skipped_status(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -8,7 +8,10 @@ Switch a prompt by changing `latest_*` in prompts.py — nothing here changes.
 
 from typing import Dict
 
-from prompts import latest_article, latest_github, latest_plain_email, latest_youtube
+try:
+    from .prompts import latest_article, latest_github, latest_plain_email, latest_youtube
+except ImportError:
+    from prompts import latest_article, latest_github, latest_plain_email, latest_youtube
 
 
 class PromptBuilder:

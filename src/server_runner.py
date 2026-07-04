@@ -16,6 +16,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.parse import parse_qsl, urlencode, urlparse
 
 try:  # package import when tested as `src.server_runner`
     from .agentwiki_writer import AgentWikiWriter
@@ -29,7 +30,7 @@ except ImportError:  # script execution as `python src/server_runner.py`
     from state_store import StateStore
 
 
-DEFAULT_QUERY = "in:inbox is:unread newer_than:30d (youtube OR youtu.be OR github.com OR subject:YouTube OR subject:GitHub)"
+DEFAULT_QUERY = 'in:inbox is:unread newer_than:30d (youtube OR youtu.be OR github.com OR article OR blog OR newsletter OR substack OR medium.com OR arxiv.org OR "read more")'
 DEFAULT_TOKEN_PATH = "/home/jozef/.hermes/google_accounts/learning/google_token.json"
 DEFAULT_NOTES_DIR = "/home/jozef/humanagentwiki/notes"
 DEFAULT_HAW_DIR = "/home/jozef/humanagentwiki"
@@ -37,13 +38,24 @@ DEFAULT_STATE_DB = "/home/jozef/.hermes/state/ai-inbox-agent/processed.sqlite"
 
 _YOUTUBE_RE = re.compile(r"https?://(?:www\.|m\.)?(?:youtube\.com/(?:watch\?[^\s<>'\"]+|embed/[A-Za-z0-9_-]{11}|shorts/[A-Za-z0-9_-]{11})|youtu\.be/[A-Za-z0-9_-]{11}[^\s<>'\"]*)")
 _GITHUB_RE = re.compile(r"https?://(?:www\.)?github\.com/([^/\s]+)/([^/\s?#.,;:!]+)(?:/[^\s<>'\"]*)?")
+_GENERIC_URL_RE = re.compile(r"https?://[^\s<>'\"\]]+[^\s<>'\"\].,;:!?)]")
 _VIDEO_ID_RE = re.compile(r"(?:v=|youtu\.be/|embed/|shorts/)([A-Za-z0-9_-]{11})")
+_ARTICLE_SKIP_RE = re.compile(
+    r"(youtube\.com|youtu\.be|github\.com|githubusercontent\.com|gist\.github\.com|codeload\.github\.com|mail\.google\.com|accounts\.google\.com|"
+    r"unsubscribe|privacy-policy|terms-of-service|list-manage\.com|"
+    r"\.(jpg|jpeg|png|gif|svg|ico|css|js|woff|woff2)([?#]|$))",
+    re.IGNORECASE,
+)
+_TRACKING_QUERY_PREFIXES = ("utm_", "mc_")
+_TRACKING_QUERY_KEYS = {"fbclid", "gclid", "ref", "ref_src", "igshid"}
+MIN_PLAIN_EMAIL_CHARS = 150
 
 
 @dataclass(frozen=True)
 class ClassifiedLinks:
     youtube: list[str] = field(default_factory=list)
     github: list[str] = field(default_factory=list)
+    articles: list[str] = field(default_factory=list)
 
 
 def _clean_url(url: str) -> str:
@@ -72,12 +84,17 @@ def _dedupe_by(values: Iterable[str], key_fn) -> list[str]:
 
 
 def classify_links(text: str) -> ClassifiedLinks:
-    """Extract YouTube and GitHub repo links from email text."""
+    """Extract YouTube, GitHub repo, and generic web article links from email text."""
     youtube = _dedupe(_clean_url(m.group(0)) for m in _YOUTUBE_RE.finditer(text or ""))
     github = _dedupe(
         f"https://github.com/{m.group(1)}/{m.group(2)}" for m in _GITHUB_RE.finditer(text or "")
     )
-    return ClassifiedLinks(youtube=youtube, github=github)
+    articles = _dedupe(
+        _clean_url(m.group(0))
+        for m in _GENERIC_URL_RE.finditer(text or "")
+        if not _ARTICLE_SKIP_RE.search(m.group(0))
+    )
+    return ClassifiedLinks(youtube=youtube, github=github, articles=articles)
 
 
 def source_id_for_youtube_url(url: str) -> str:
@@ -90,6 +107,17 @@ def source_id_for_github_url(url: str) -> str:
     if not match:
         return _clean_url(url)
     return f"{match.group(1)}/{match.group(2)}"
+
+
+def source_id_for_article_url(url: str) -> str:
+    parsed = urlparse(_clean_url(url))
+    kept = []
+    for key, value in parse_qsl(parsed.query, keep_blank_values=True):
+        lower = key.lower()
+        if lower in _TRACKING_QUERY_KEYS or lower.startswith(_TRACKING_QUERY_PREFIXES):
+            continue
+        kept.append((key, value))
+    return parsed._replace(fragment="", query=urlencode(kept, doseq=True)).geturl()
 
 
 def _lazy_content_preparator():
@@ -108,6 +136,7 @@ def process_messages(
     state_db: str | Path,
     gmail_account: str = "learning",
     dry_run: bool = False,
+    include_plain_emails: bool = False,
 ) -> tuple[str, list[str]]:
     """Process fetched Gmail messages.
 
@@ -125,16 +154,23 @@ def process_messages(
     ContentPreparator = None
 
     for msg in messages:
-        if store and store.is_message_processed(gmail_account, msg.id):
-            continue
+        if store:
+            existing_status = store.get_message_status(gmail_account, msg.id)
+            if existing_status:
+                digest_lines.append(f"⏭️ Already handled email ({existing_status}): {msg.subject or msg.id}")
+                successful_message_ids.append(msg.id)
+                continue
 
-        links = classify_links("\n".join([msg.subject, msg.body, msg.snippet]))
-        if not links.youtube and not links.github:
+        email_text = "\n".join([msg.subject, msg.body, msg.snippet])
+        links = classify_links(email_text)
+        has_links = bool(links.youtube or links.github or links.articles)
+        plain_candidate = include_plain_emails and len((msg.body or "").strip()) >= MIN_PLAIN_EMAIL_CHARS
+        if not has_links and not plain_candidate:
             continue
 
         if dry_run:
             digest_lines.append(
-                f"DRY RUN: {msg.subject or msg.id} — YouTube {len(links.youtube)}, GitHub {len(links.github)}"
+                f"DRY RUN: {msg.subject or msg.id} — YouTube {len(links.youtube)}, GitHub {len(links.github)}, Articles {len(links.articles)}, PlainEmail {1 if plain_candidate and not has_links else 0}"
             )
             continue
 
@@ -148,8 +184,12 @@ def process_messages(
             source_id_for_youtube_url,
         )
         github_urls = [u for u in links.github if not store.is_source_processed("github", source_id_for_github_url(u))]
+        article_urls = _dedupe_by(
+            (u for u in links.articles if not store.is_source_processed("article", source_id_for_article_url(u))),
+            source_id_for_article_url,
+        )
 
-        if not youtube_urls and not github_urls:
+        if has_links and not youtube_urls and not github_urls and not article_urls:
             store.record_message(
                 gmail_account=gmail_account,
                 gmail_message_id=msg.id,
@@ -169,7 +209,7 @@ def process_messages(
             youtube_items = ContentPreparator.prepare_youtube_batch(youtube_urls, email_body=msg.body)
             for item in youtube_items:
                 item.setdefault("video_id", source_id_for_youtube_url(str(item.get("url", ""))))
-                item.setdefault("classification", classify_youtube_item(item, email_text="\n".join([msg.subject, msg.body, msg.snippet])))
+                item.setdefault("classification", classify_youtube_item(item, email_text=email_text))
                 rel_path = writer.write_youtube_note(item, email_meta=msg.email_meta, gmail_account=gmail_account)
                 writer.upsert_youtube_index(item, rel_path)
                 store.record_source(
@@ -197,6 +237,30 @@ def process_messages(
                 digest_lines.append(f"🐙 {item.get('owner', '')}/{item.get('repo', '')} → {rel_path}")
                 wrote_anything = True
 
+        if article_urls:
+            article_items = ContentPreparator.prepare_article_batch(article_urls)
+            for item in article_items:
+                rel_path = writer.write_article_note(item, email_meta=msg.email_meta, gmail_account=gmail_account)
+                writer.upsert_article_index(item, rel_path)
+                store.record_source(
+                    source_type="article",
+                    source_id=source_id_for_article_url(str(item.get("url", ""))),
+                    source_url=str(item.get("url", "")),
+                    note_path=rel_path,
+                    first_seen_message_id=msg.id,
+                )
+                digest_lines.append(f"📰 {item.get('title', 'Web article')} → {rel_path}")
+                wrote_anything = True
+
+        if plain_candidate and not has_links:
+            item = ContentPreparator.prepare_plain_email(msg.subject, msg.from_addr, msg.body)
+            if item:
+                rel_path = writer.write_plain_email_note(item, email_meta=msg.email_meta, gmail_account=gmail_account)
+                writer.upsert_plain_email_index(item, rel_path)
+                digest_lines.append(f"✉️ {item.get('subject', msg.subject or 'Email')} → {rel_path}")
+                wrote_anything = True
+
+        failed_processing = (has_links or plain_candidate) and not wrote_anything
         if wrote_anything:
             store.record_message(
                 gmail_account=gmail_account,
@@ -206,6 +270,17 @@ def process_messages(
                 from_addr=msg.from_addr,
                 status="processed",
             )
+            successful_message_ids.append(msg.id)
+        elif failed_processing:
+            store.record_message(
+                gmail_account=gmail_account,
+                gmail_message_id=msg.id,
+                thread_id=msg.thread_id,
+                subject=msg.subject,
+                from_addr=msg.from_addr,
+                status="skipped_failed_processing",
+            )
+            digest_lines.append(f"⚠️ Failed processing links in email: {msg.subject or msg.id}")
             successful_message_ids.append(msg.id)
 
     return "\n".join(digest_lines).strip(), successful_message_ids
@@ -258,6 +333,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--notes-dir", default=os.getenv("NOTES_DIR", DEFAULT_NOTES_DIR))
     parser.add_argument("--humanagentwiki-dir", default=os.getenv("HUMANAGENTWIKI_DIR", DEFAULT_HAW_DIR))
     parser.add_argument("--state-db", default=os.getenv("AI_INBOX_STATE_DB", DEFAULT_STATE_DB))
+    parser.add_argument(
+        "--include-plain-emails",
+        action="store_true",
+        default=os.getenv("AI_INBOX_INCLUDE_PLAIN_EMAILS", "false").lower() in {"1", "true", "yes", "on"},
+        help="Also summarize long unread emails with no links. Disabled by default to avoid newsletter noise.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser
 
@@ -272,6 +353,7 @@ def main() -> int:
         state_db=args.state_db,
         gmail_account=args.gmail_account,
         dry_run=args.dry_run,
+        include_plain_emails=args.include_plain_emails,
     )
     if successful_ids:
         index_ok, index_message = index_humanagentwiki(args.humanagentwiki_dir, args.notes_dir, dry_run=args.dry_run)

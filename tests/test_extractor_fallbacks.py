@@ -1,3 +1,4 @@
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -10,6 +11,19 @@ from extractors_full import GitHubExtractor
 
 
 class ExtractorFallbackTests(unittest.TestCase):
+    def test_extractors_full_imports_as_package_module(self):
+        repo = Path(__file__).resolve().parents[1]
+        proc = subprocess.run(
+            [str(repo / ".venv" / "bin" / "python"), "-c", "import src.extractors_full; print('IMPORT_OK')"],
+            cwd=repo,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=30,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertIn("IMPORT_OK", proc.stdout)
+
     def test_github_summary_falls_back_when_claude_fails(self):
         repo_info = {
             "owner": "jv813yh",

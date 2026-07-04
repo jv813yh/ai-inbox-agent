@@ -145,16 +145,24 @@ python3 src/server_runner.py --max-emails 5
 ### Behavior
 
 - Reads only unread matching Gmail messages.
-- Processes YouTube and GitHub links.
+- Processes YouTube, GitHub, and generic web article links.
+- Long plain emails without links can also be summarized when `--include-plain-emails` or `AI_INBOX_INCLUDE_PLAIN_EMAILS=true` is enabled.
 - Writes GitHub Markdown notes into:
   - `GitHub Projects/`
+- Writes web article Markdown notes into:
+  - `Web Articles/<domain>/`
+- Writes plain email Markdown notes into:
+  - `Emails/<YYYY-MM>/`
 - Writes YouTube Markdown notes into topic/channel folders for later RAG/fine-tuning use:
   - `YouTube/Investovanie/<channel>/`
   - `YouTube/Technologie/<channel>/`
   - `YouTube/Ostatne/<channel>/`
 - Adds RAG-friendly frontmatter metadata such as `domain`, `topic`, `channel_slug`, `dataset_use`, and `source_type`.
 - Maintains per-domain YouTube index notes such as `Indexes/youtube-investovanie-index.md` and `Indexes/youtube-technologie-index.md`.
-- Maintains a local SQLite dedupe store so repeated links are not processed again.
+- Maintains article and email indexes:
+  - `Indexes/web-article-index.md`
+  - `Indexes/plain-email-index.md`
+- Maintains a local SQLite dedupe store so repeated links are not processed again. YouTube dedupes by `video_id`, GitHub by `owner/repo`, and web articles by canonical URL with tracking params stripped.
 - Runs the HumanAgentWiki indexer after successful note writes.
 - Marks email as read only after successful processing.
 - Prints a Telegram-ready digest to stdout for Hermes cron delivery.
