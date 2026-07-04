@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import parse_qsl, urlencode, urlparse
@@ -339,6 +340,54 @@ def index_humanagentwiki(humanagentwiki_dir: str | Path, notes_dir: str | Path, 
         return False, f"HumanAgentWiki index failed: {exc}; note files are saved and indexing is queued for later"
 
 
+def write_daily_personal_ai_news_report(
+    notes_dir: str | Path,
+    digest: str,
+    *,
+    run_at: datetime | None = None,
+    title: str = "AI Inbox Agent",
+) -> str:
+    """Persist the Telegram-ready AI news digest into HumanAgentWiki notes."""
+    if not digest.strip():
+        return ""
+    timestamp = run_at or datetime.now().astimezone()
+    day = timestamp.strftime("%Y-%m-%d")
+    hour = timestamp.strftime("%H%M")
+    rel_path = Path("Daily Personal AI news") / day / hour / "ai-inbox-agent.md"
+    root = Path(notes_dir).expanduser().resolve()
+    path = (root / rel_path).resolve()
+    if root not in path.parents:
+        raise ValueError(f"Refusing to write outside notes dir: {rel_path}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rendered = f"📬 {title}\n{digest.strip()}"
+    content = f"""---
+title: {title} - {day} {hour}
+category: Daily Personal AI news
+type: ai_news_digest
+tags: [daily-ai-news, ai-inbox, telegram-digest]
+source_type: ai_inbox_agent
+dataset_use: rag
+date: {day}
+hour: {hour}
+processed_at: {timestamp.isoformat()}
+---
+
+# {title} - {day} {hour}
+
+## Telegram digest
+
+```text
+{rendered}
+```
+
+## Related
+- [[Learning Gmail Inbox]]
+- [[Daily Personal AI news]]
+"""
+    path.write_text(content, encoding="utf-8")
+    return rel_path.as_posix()
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Process learning Gmail into HumanAgentWiki notes")
     parser.add_argument("--gmail-account", default=os.getenv("AI_INBOX_GMAIL_ACCOUNT", "learning"))
@@ -370,6 +419,7 @@ def main() -> int:
         dry_run=args.dry_run,
         include_plain_emails=args.include_plain_emails,
     )
+    index_ok = True
     if successful_ids:
         index_ok, index_message = index_humanagentwiki(args.humanagentwiki_dir, args.notes_dir, dry_run=args.dry_run)
         if not index_ok:
@@ -377,8 +427,15 @@ def main() -> int:
         if not args.dry_run and index_ok:
             client.mark_read(successful_ids)
     if digest:
+        report_rel_path = ""
+        if not args.dry_run and index_ok:
+            report_rel_path = write_daily_personal_ai_news_report(args.notes_dir, digest)
+            if report_rel_path:
+                index_humanagentwiki(args.humanagentwiki_dir, args.notes_dir, dry_run=False)
         print("📬 AI Inbox Agent")
         print(digest)
+        if report_rel_path:
+            print(f"\n🗞️ Saved daily AI news digest → {report_rel_path}")
         if args.dry_run:
             print("\nDRY RUN: no notes/state/email-read changes applied.")
     return 0

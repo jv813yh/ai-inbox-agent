@@ -163,6 +163,8 @@ python3 src/server_runner.py --max-emails 5
 - Maintains article and email indexes:
   - `Indexes/web-article-index.md`
   - `Indexes/plain-email-index.md`
+- Saves the Telegram/stdout digest into HumanAgentWiki for later retrieval:
+  - `Daily Personal AI news/<YYYY-MM-DD>/<HHMM>/ai-inbox-agent.md`
 - Maintains a local SQLite dedupe store so repeated links are not processed again. YouTube dedupes by `video_id`, GitHub by `owner/repo`, and web articles by canonical URL with tracking params stripped.
 - Runs the HumanAgentWiki indexer after successful note writes.
 - Marks email as read only after successful processing.

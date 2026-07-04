@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 from src.gmail_api_client import GmailMessage
@@ -11,6 +12,7 @@ from src.server_runner import (
     source_id_for_article_url,
     source_id_for_github_url,
     source_id_for_youtube_url,
+    write_daily_personal_ai_news_report,
 )
 from src.state_store import StateStore
 
@@ -55,6 +57,54 @@ class ServerRunnerRoutingTests(unittest.TestCase):
         cleaned = source_id_for_article_url("https://example.com/post?utm_source=x&ref=newsletter&id=42#comments")
 
         self.assertEqual(cleaned, "https://example.com/post?id=42")
+
+    def test_write_daily_personal_ai_news_report_uses_date_hour_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            notes_dir = Path(tmp)
+            rel_path = write_daily_personal_ai_news_report(
+                notes_dir,
+                "🎥 Item → YouTube/Technologie/Channel/item.md",
+                run_at=datetime(2026, 7, 4, 19, 5, tzinfo=timezone.utc),
+            )
+            report = notes_dir / rel_path
+
+            self.assertEqual(rel_path, "Daily Personal AI news/2026-07-04/1905/ai-inbox-agent.md")
+            self.assertTrue(report.exists())
+            text = report.read_text(encoding="utf-8")
+            self.assertIn("category: Daily Personal AI news", text)
+            self.assertIn("📬 AI Inbox Agent", text)
+            self.assertIn("🎥 Item", text)
+
+    def test_main_saves_daily_personal_ai_news_report_after_successful_index(self):
+        from src import server_runner
+
+        class FakeClient:
+            marked_read = []
+
+            def __init__(self, token_path):
+                self.token_path = token_path
+
+            def search_unread(self, query, *, max_results=5):
+                return [GmailMessage(id="msg-ok", thread_id="thread-1", subject="AI", from_addr="sender@example.com", date="today", body="body")]
+
+            def mark_read(self, ids):
+                self.marked_read.extend(ids)
+
+        def fake_process_messages(messages, **kwargs):
+            return "📰 Article → Web Articles/Technologie/example.com/article.md", ["msg-ok"]
+
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(server_runner, "GmailApiClient", FakeClient), \
+             patch.object(server_runner, "process_messages", side_effect=fake_process_messages), \
+             patch.object(server_runner, "index_humanagentwiki", return_value=(True, "indexed")), \
+             patch("sys.argv", ["server_runner.py", "--notes-dir", str(Path(tmp) / "notes"), "--humanagentwiki-dir", str(Path(tmp) / "haw")]):
+            self.assertEqual(server_runner.main(), 0)
+            reports = list((Path(tmp) / "notes" / "Daily Personal AI news").glob("*/*/ai-inbox-agent.md"))
+            self.assertEqual(len(reports), 1)
+            report_text = reports[0].read_text(encoding="utf-8")
+
+        self.assertEqual(FakeClient.marked_read, ["msg-ok"])
+        self.assertIn("📰 Article", report_text)
 
     def test_dry_run_does_not_create_state_db_or_notes(self):
         with tempfile.TemporaryDirectory() as tmp:
