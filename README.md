@@ -144,15 +144,16 @@ python3 src/server_runner.py --max-emails 5
 
 ### Behavior
 
-- Reads only unread matching Gmail messages.
-- Processes YouTube, GitHub, and generic web article links.
-- Long plain emails without links can also be summarized when `--include-plain-emails` or `AI_INBOX_INCLUDE_PLAIN_EMAILS=true` is enabled.
+- Reads all unread messages from the dedicated learning Gmail inbox (`in:inbox is:unread newer_than:30d`).
+- Processes emails containing one link or a list of links: YouTube, GitHub, generic web pages/articles, blogs, newsletters, Substack, Medium, arXiv, and similar URLs.
+- Long plain emails without supported links are summarized by default for the learning Gmail account; short/no-link emails are recorded as `skipped_unclassified` so they do not loop forever.
+- Classifies notes into logical wiki folders (`Technologie`, `Investovanie`, `Produktivita`, `Biznis`, `Ostatne`) using deterministic host/keyword rules before falling back to `Ostatne`.
 - Writes GitHub Markdown notes into:
   - `GitHub Projects/`
 - Writes web article Markdown notes into:
-  - `Web Articles/<domain>/`
+  - `Web Articles/<classification>/<domain>/`
 - Writes plain email Markdown notes into:
-  - `Emails/<YYYY-MM>/`
+  - `Emails/<classification>/<YYYY-MM>/`
 - Writes YouTube Markdown notes into topic/channel folders for later RAG/fine-tuning use:
   - `YouTube/Investovanie/<channel>/`
   - `YouTube/Technologie/<channel>/`

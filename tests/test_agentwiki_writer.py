@@ -119,10 +119,11 @@ class AgentWikiWriterTests(unittest.TestCase):
             rel_path = writer.write_article_note(item, email_meta=email_meta, gmail_account="learning")
             text = (notes_dir / rel_path).read_text(encoding="utf-8")
 
-            self.assertTrue(rel_path.startswith("Web Articles/example-com/"))
+            self.assertTrue(rel_path.startswith("Web Articles/Technologie/example.com/"))
             self.assertIn("category: Web Articles", text)
             self.assertIn("type: web_article", text)
-            self.assertIn("domain: example.com", text)
+            self.assertIn("domain: Technologie", text)
+            self.assertIn("source_host: example.com", text)
             self.assertIn("dataset_use: rag", text)
             self.assertIn("## Where Jozef could use it", text)
 
@@ -147,7 +148,7 @@ class AgentWikiWriterTests(unittest.TestCase):
             rel_path = writer.write_plain_email_note(item, email_meta=email_meta, gmail_account="learning")
             text = (notes_dir / rel_path).read_text(encoding="utf-8")
 
-            self.assertTrue(rel_path.startswith("Emails/2026-07/"))
+            self.assertTrue(rel_path.startswith("Emails/Ostatne/2026-07/"))
             self.assertIn("category: Emails", text)
             self.assertIn("type: plain_email", text)
             self.assertIn("from_addr: \"sender@example.com\"", text)
