@@ -6,6 +6,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import urlparse
 
 try:
     from .content_classifier import classify_youtube_item, folder_parts_for_youtube
@@ -72,11 +73,14 @@ class AgentWikiWriter:
 
     @staticmethod
     def _email_source(email_meta: Mapping[str, Any]) -> str:
+        def clean(value: Any) -> str:
+            return " ".join(str(value or "").replace("\r", " ").replace("\n", " ").split())
+
         return (
-            f"From: {email_meta.get('from', 'Unknown')}\n"
-            f"Subject: {email_meta.get('subject', '')}\n"
-            f"Date: {email_meta.get('date', '')}\n"
-            f"Message-ID: {email_meta.get('message_id', '')}"
+            f"From: {clean(email_meta.get('from', 'Unknown'))}\n"
+            f"Subject: {clean(email_meta.get('subject', ''))}\n"
+            f"Date: {clean(email_meta.get('date', ''))}\n"
+            f"Message-ID: {clean(email_meta.get('message_id', ''))}"
         )
 
     @staticmethod
@@ -228,6 +232,121 @@ Email source:
 """
         return self._write_note(rel_path, front + "\n\n" + body)
 
+    @staticmethod
+    def _domain_from_url(url: str) -> str:
+        host = urlparse(url or "").netloc.lower().removeprefix("www.")
+        return host or "unknown-domain"
+
+    def write_article_note(
+        self,
+        item: Mapping[str, Any],
+        *,
+        email_meta: Mapping[str, Any],
+        gmail_account: str,
+    ) -> str:
+        title = str(item.get("title") or item.get("url") or "Web Article")
+        url = str(item.get("url") or "")
+        domain = self._domain_from_url(url)
+        date_prefix = str(item.get("processed_at", ""))[:10] or "undated"
+        rel_path = f"Web Articles/{slugify(domain)}/{date_prefix}--{slugify(title)}.md"
+
+        front = _frontmatter(
+            {
+                "title": title,
+                "category": "Web Articles",
+                "type": "web_article",
+                "tags": ["article", "web", "ai-inbox", "learning-gmail"],
+                "source_url": url,
+                "source_type": "web_article",
+                "domain": domain,
+                "dataset_use": "rag",
+                "gmail_account": gmail_account,
+                "gmail_message_id": email_meta.get("message_id", ""),
+                "processed_at": item.get("processed_at", ""),
+            }
+        )
+        body = f"""# {title}
+
+Source: {url}
+
+Email source:
+{self._email_source(email_meta)}
+
+## Summary
+{item.get('summary', '').strip()}
+
+## My take
+{item.get('my_take', '').strip()}
+
+## Where Jozef could use it
+- Review for AI agents, backend, automation, investing, learning, or product ideas depending on the article topic.
+
+## How to use it
+- Open the source link for full context.
+- Convert useful claims into follow-up tasks or notes.
+- Use the metadata and summary later for RAG retrieval.
+
+## Source metadata
+- Source type: web_article
+- Domain: {domain}
+- Dataset use: rag
+
+## Related
+- [[Web Article Index]]
+- [[Learning Gmail Inbox]]
+"""
+        return self._write_note(rel_path, front + "\n\n" + body)
+
+    def write_plain_email_note(
+        self,
+        item: Mapping[str, Any],
+        *,
+        email_meta: Mapping[str, Any],
+        gmail_account: str,
+    ) -> str:
+        subject = str(item.get("subject") or email_meta.get("subject") or "Email")
+        from_addr = str(item.get("from_addr") or email_meta.get("from") or "")
+        date_prefix = str(item.get("processed_at", ""))[:10] or "undated"
+        month = date_prefix[:7] if len(date_prefix) >= 7 else "undated"
+        rel_path = f"Emails/{month}/{date_prefix}--{slugify(subject)}.md"
+
+        front = _frontmatter(
+            {
+                "title": subject,
+                "category": "Emails",
+                "type": "plain_email",
+                "tags": ["email", "ai-inbox", "learning-gmail"],
+                "from_addr": from_addr,
+                "subject": subject,
+                "dataset_use": "rag",
+                "gmail_account": gmail_account,
+                "gmail_message_id": email_meta.get("message_id", ""),
+                "processed_at": item.get("processed_at", ""),
+            }
+        )
+        body = f"""# {subject}
+
+Email source:
+{self._email_source(email_meta)}
+
+## Summary
+{item.get('summary', '').strip()}
+
+## My take
+{item.get('my_take', '').strip()}
+
+## Action items
+
+## Source metadata
+- Source type: plain_email
+- Dataset use: rag
+
+## Related
+- [[Plain Email Index]]
+- [[Learning Gmail Inbox]]
+"""
+        return self._write_note(rel_path, front + "\n\n" + body)
+
     def upsert_youtube_index(self, item: Mapping[str, Any], rel_note_path: str) -> str:
         title = str(item.get("title") or item.get("url") or "YouTube Video")
         classification = self._youtube_classification(item)
@@ -248,6 +367,16 @@ Email source:
         name = f"{item.get('owner', 'unknown')}/{item.get('repo', 'unknown')}"
         entry = f"- [[{name}]] — {item.get('language', 'Unknown')} / ⭐{item.get('stars', 0)} — {item.get('url', '')} — `{rel_note_path}`"
         return self._upsert_index("Indexes/github-project-index.md", "GitHub Project Index", ["index", "github", "ai-inbox"], entry)
+
+    def upsert_article_index(self, item: Mapping[str, Any], rel_note_path: str) -> str:
+        title = str(item.get("title") or item.get("url") or "Web Article")
+        entry = f"- [[{title}]] — {self._domain_from_url(str(item.get('url', '')))} — {item.get('url', '')} — `{rel_note_path}`"
+        return self._upsert_index("Indexes/web-article-index.md", "Web Article Index", ["index", "article", "web", "ai-inbox"], entry)
+
+    def upsert_plain_email_index(self, item: Mapping[str, Any], rel_note_path: str) -> str:
+        subject = str(item.get("subject") or "Email")
+        entry = f"- [[{subject}]] — {item.get('from_addr', 'Unknown')} — `{rel_note_path}`"
+        return self._upsert_index("Indexes/plain-email-index.md", "Plain Email Index", ["index", "email", "ai-inbox"], entry)
 
     def _upsert_index(self, rel_path: str, title: str, tags: list[str], entry: str) -> str:
         path = self._safe_path(rel_path)

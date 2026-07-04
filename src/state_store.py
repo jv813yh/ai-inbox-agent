@@ -57,15 +57,18 @@ class StateStore:
         return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
     def is_message_processed(self, gmail_account: str, gmail_message_id: str) -> bool:
+        return self.get_message_status(gmail_account, gmail_message_id) == "processed"
+
+    def get_message_status(self, gmail_account: str, gmail_message_id: str) -> Optional[str]:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT 1 FROM processed_messages
-                WHERE gmail_account = ? AND gmail_message_id = ? AND status = 'processed'
+                SELECT status FROM processed_messages
+                WHERE gmail_account = ? AND gmail_message_id = ?
                 """,
                 (gmail_account, gmail_message_id),
             ).fetchone()
-        return row is not None
+        return row[0] if row else None
 
     def record_message(
         self,
