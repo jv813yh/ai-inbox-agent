@@ -9,9 +9,9 @@ from typing import Any, Mapping
 from urllib.parse import urlparse
 
 try:
-    from .content_classifier import classify_youtube_item, folder_parts_for_youtube
+    from .content_classifier import classify_article_item, classify_plain_email_item, classify_youtube_item, folder_parts_for_article, folder_parts_for_plain_email, folder_parts_for_youtube
 except ImportError:
-    from content_classifier import classify_youtube_item, folder_parts_for_youtube
+    from content_classifier import classify_article_item, classify_plain_email_item, classify_youtube_item, folder_parts_for_article, folder_parts_for_plain_email, folder_parts_for_youtube
 
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -247,8 +247,11 @@ Email source:
         title = str(item.get("title") or item.get("url") or "Web Article")
         url = str(item.get("url") or "")
         domain = self._domain_from_url(url)
+        classification = dict(item.get("classification") or classify_article_item(item))
+        classification.setdefault("source_host", domain)
         date_prefix = str(item.get("processed_at", ""))[:10] or "undated"
-        rel_path = f"Web Articles/{slugify(domain)}/{date_prefix}--{slugify(title)}.md"
+        folder = "/".join(folder_parts_for_article(classification))
+        rel_path = f"{folder}/{date_prefix}--{slugify(title)}.md"
 
         front = _frontmatter(
             {
@@ -258,7 +261,11 @@ Email source:
                 "tags": ["article", "web", "ai-inbox", "learning-gmail"],
                 "source_url": url,
                 "source_type": "web_article",
-                "domain": domain,
+                "domain": classification.get("domain", domain),
+                "topic": classification.get("topic", classification.get("domain", domain)),
+                "source_host": classification.get("source_host", domain),
+                "classification_method": classification.get("method", "fallback"),
+                "classification_confidence": classification.get("confidence", 0.30),
                 "dataset_use": "rag",
                 "gmail_account": gmail_account,
                 "gmail_message_id": email_meta.get("message_id", ""),
@@ -288,7 +295,9 @@ Email source:
 
 ## Source metadata
 - Source type: web_article
-- Domain: {domain}
+- Domain: {classification.get('domain', domain)}
+- Topic: {classification.get('topic', classification.get('domain', domain))}
+- Source host: {classification.get('source_host', domain)}
 - Dataset use: rag
 
 ## Related
@@ -308,7 +317,9 @@ Email source:
         from_addr = str(item.get("from_addr") or email_meta.get("from") or "")
         date_prefix = str(item.get("processed_at", ""))[:10] or "undated"
         month = date_prefix[:7] if len(date_prefix) >= 7 else "undated"
-        rel_path = f"Emails/{month}/{date_prefix}--{slugify(subject)}.md"
+        classification = dict(item.get("classification") or classify_plain_email_item(item))
+        folder = "/".join(folder_parts_for_plain_email(classification, month))
+        rel_path = f"{folder}/{date_prefix}--{slugify(subject)}.md"
 
         front = _frontmatter(
             {
@@ -318,6 +329,10 @@ Email source:
                 "tags": ["email", "ai-inbox", "learning-gmail"],
                 "from_addr": from_addr,
                 "subject": subject,
+                "domain": classification.get("domain", "Ostatne"),
+                "topic": classification.get("topic", classification.get("domain", "Ostatne")),
+                "classification_method": classification.get("method", "fallback"),
+                "classification_confidence": classification.get("confidence", 0.30),
                 "dataset_use": "rag",
                 "gmail_account": gmail_account,
                 "gmail_message_id": email_meta.get("message_id", ""),
@@ -339,6 +354,8 @@ Email source:
 
 ## Source metadata
 - Source type: plain_email
+- Domain: {classification.get('domain', 'Ostatne')}
+- Topic: {classification.get('topic', classification.get('domain', 'Ostatne'))}
 - Dataset use: rag
 
 ## Related

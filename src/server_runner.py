@@ -20,17 +20,17 @@ from urllib.parse import parse_qsl, urlencode, urlparse
 
 try:  # package import when tested as `src.server_runner`
     from .agentwiki_writer import AgentWikiWriter
-    from .content_classifier import classify_youtube_item
+    from .content_classifier import classify_article_item, classify_plain_email_item, classify_youtube_item
     from .gmail_api_client import GmailApiClient, GmailMessage
     from .state_store import StateStore
 except ImportError:  # script execution as `python src/server_runner.py`
     from agentwiki_writer import AgentWikiWriter
-    from content_classifier import classify_youtube_item
+    from content_classifier import classify_article_item, classify_plain_email_item, classify_youtube_item
     from gmail_api_client import GmailMessage, GmailApiClient
     from state_store import StateStore
 
 
-DEFAULT_QUERY = 'in:inbox is:unread newer_than:30d (youtube OR youtu.be OR github.com OR article OR blog OR newsletter OR substack OR medium.com OR arxiv.org OR "read more")'
+DEFAULT_QUERY = "in:inbox is:unread newer_than:30d"
 DEFAULT_TOKEN_PATH = "/home/jozef/.hermes/google_accounts/learning/google_token.json"
 DEFAULT_NOTES_DIR = "/home/jozef/humanagentwiki/notes"
 DEFAULT_HAW_DIR = "/home/jozef/humanagentwiki"
@@ -165,13 +165,26 @@ def process_messages(
         links = classify_links(email_text)
         has_links = bool(links.youtube or links.github or links.articles)
         plain_candidate = include_plain_emails and len((msg.body or "").strip()) >= MIN_PLAIN_EMAIL_CHARS
-        if not has_links and not plain_candidate:
-            continue
+        unclassified_candidate = not has_links and not plain_candidate
 
         if dry_run:
             digest_lines.append(
-                f"DRY RUN: {msg.subject or msg.id} — YouTube {len(links.youtube)}, GitHub {len(links.github)}, Articles {len(links.articles)}, PlainEmail {1 if plain_candidate and not has_links else 0}"
+                f"DRY RUN: {msg.subject or msg.id} — YouTube {len(links.youtube)}, GitHub {len(links.github)}, Articles {len(links.articles)}, PlainEmail {1 if plain_candidate and not has_links else 0}, Unclassified {1 if unclassified_candidate else 0}"
             )
+            continue
+
+        if unclassified_candidate:
+            assert store is not None
+            store.record_message(
+                gmail_account=gmail_account,
+                gmail_message_id=msg.id,
+                thread_id=msg.thread_id,
+                subject=msg.subject,
+                from_addr=msg.from_addr,
+                status="skipped_unclassified",
+            )
+            digest_lines.append(f"⏭️ Skipped unclassified short/no-link email: {msg.subject or msg.id}")
+            successful_message_ids.append(msg.id)
             continue
 
         assert store is not None
@@ -240,6 +253,7 @@ def process_messages(
         if article_urls:
             article_items = ContentPreparator.prepare_article_batch(article_urls)
             for item in article_items:
+                item.setdefault("classification", classify_article_item(item, email_text=email_text))
                 rel_path = writer.write_article_note(item, email_meta=msg.email_meta, gmail_account=gmail_account)
                 writer.upsert_article_index(item, rel_path)
                 store.record_source(
@@ -255,6 +269,7 @@ def process_messages(
         if plain_candidate and not has_links:
             item = ContentPreparator.prepare_plain_email(msg.subject, msg.from_addr, msg.body)
             if item:
+                item.setdefault("classification", classify_plain_email_item(item, email_text=email_text))
                 rel_path = writer.write_plain_email_note(item, email_meta=msg.email_meta, gmail_account=gmail_account)
                 writer.upsert_plain_email_index(item, rel_path)
                 digest_lines.append(f"✉️ {item.get('subject', msg.subject or 'Email')} → {rel_path}")
@@ -336,8 +351,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--include-plain-emails",
         action="store_true",
-        default=os.getenv("AI_INBOX_INCLUDE_PLAIN_EMAILS", "false").lower() in {"1", "true", "yes", "on"},
-        help="Also summarize long unread emails with no links. Disabled by default to avoid newsletter noise.",
+        default=os.getenv("AI_INBOX_INCLUDE_PLAIN_EMAILS", "true").lower() in {"1", "true", "yes", "on"},
+        help="Also summarize long unread emails with no links. Enabled by default for the dedicated learning Gmail account.",
     )
     parser.add_argument("--dry-run", action="store_true")
     return parser

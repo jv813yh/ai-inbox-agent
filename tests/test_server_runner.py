@@ -16,14 +16,8 @@ from src.state_store import StateStore
 
 
 class ServerRunnerRoutingTests(unittest.TestCase):
-    def test_default_query_fetches_linked_unread_email_without_full_inbox_sweep(self):
-        self.assertIn("in:inbox", DEFAULT_QUERY)
-        self.assertIn("is:unread", DEFAULT_QUERY)
-        self.assertIn("github.com", DEFAULT_QUERY)
-        self.assertIn("article", DEFAULT_QUERY)
-        self.assertIn("newsletter", DEFAULT_QUERY)
-        self.assertNotIn("http OR https", DEFAULT_QUERY)
-        self.assertNotEqual(DEFAULT_QUERY, "in:inbox is:unread newer_than:30d")
+    def test_default_query_reads_all_unread_learning_inbox(self):
+        self.assertEqual(DEFAULT_QUERY, "in:inbox is:unread newer_than:30d")
 
     def test_classifies_youtube_and_github_links_from_email_body(self):
         body = """
@@ -244,12 +238,61 @@ class ServerRunnerRoutingTests(unittest.TestCase):
             )
 
             digest, successful_ids = process_messages([msg], notes_dir=root / "notes", state_db=root / "state.sqlite")
-            notes = list((root / "notes" / "Web Articles" / "example-com").glob("*.md"))
+            notes = list((root / "notes" / "Web Articles").glob("*/*/*.md"))
 
         self.assertEqual(successful_ids, ["msg-article"])
         self.assertEqual(FakeContentPreparator.seen_urls, ["https://example.com/blog/useful?utm_source=newsletter"])
         self.assertEqual(len(notes), 1)
         self.assertIn("Useful Article", digest)
+
+
+    def test_process_messages_routes_multiple_article_links_from_one_email(self):
+        class FakeContentPreparator:
+            seen_urls = []
+
+            @staticmethod
+            def prepare_youtube_batch(urls, email_body=""):
+                return []
+
+            @staticmethod
+            def prepare_github_batch(urls):
+                return []
+
+            @staticmethod
+            def prepare_article_batch(urls, **kwargs):
+                FakeContentPreparator.seen_urls = list(urls)
+                return [
+                    {
+                        "type": "web_article",
+                        "url": url,
+                        "title": f"Article {idx}",
+                        "summary": "Useful AI systems article.",
+                        "my_take": "Useful for technology learning.",
+                        "processed_at": "2026-07-04T10:00:00+00:00",
+                    }
+                    for idx, url in enumerate(urls, start=1)
+                ]
+
+        with tempfile.TemporaryDirectory() as tmp, patch("src.server_runner._lazy_content_preparator", return_value=FakeContentPreparator):
+            root = Path(tmp)
+            msg = GmailMessage(
+                id="msg-many-articles",
+                thread_id="thread-1",
+                subject="List of links",
+                from_addr="sender@example.com",
+                date="today",
+                body="Read https://example.com/one and https://another.example/two",
+            )
+
+            digest, successful_ids = process_messages([msg], notes_dir=root / "notes", state_db=root / "state.sqlite")
+            notes = list((root / "notes" / "Web Articles").glob("*/*/*.md"))
+
+        self.assertEqual(successful_ids, ["msg-many-articles"])
+        self.assertEqual(len(FakeContentPreparator.seen_urls), 2)
+        self.assertEqual(len(notes), 2)
+        self.assertIn("Article 1", digest)
+        self.assertIn("Article 2", digest)
+
 
     def test_process_messages_dedupes_article_links_by_canonical_url(self):
         class FakeContentPreparator:
@@ -359,22 +402,30 @@ class ServerRunnerRoutingTests(unittest.TestCase):
         self.assertEqual(row[0], "skipped_failed_processing")
         self.assertIn("failed processing", digest.lower())
 
-    def test_process_messages_plain_email_skipped_by_default(self):
+    def test_process_messages_short_no_link_email_records_skipped_unclassified_by_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            state_db = root / "state.sqlite"
+            store = StateStore(state_db)
             msg = GmailMessage(
-                id="msg-plain",
+                id="msg-short",
                 thread_id="thread-1",
-                subject="Long useful email",
+                subject="Short misc email",
                 from_addr="sender@example.com",
                 date="today",
-                body="This is a long useful email. " * 20,
+                body="ok",
             )
 
-            digest, successful_ids = process_messages([msg], notes_dir=root / "notes", state_db=root / "state.sqlite")
+            digest, successful_ids = process_messages([msg], notes_dir=root / "notes", state_db=state_db)
+            with store._connect() as conn:
+                row = conn.execute(
+                    "select status from processed_messages where gmail_account=? and gmail_message_id=?",
+                    ("learning", "msg-short"),
+                ).fetchone()
 
-        self.assertEqual(digest, "")
-        self.assertEqual(successful_ids, [])
+        self.assertEqual(successful_ids, ["msg-short"])
+        self.assertEqual(row[0], "skipped_unclassified")
+        self.assertIn("Skipped unclassified", digest)
 
     def test_process_messages_plain_email_processed_when_enabled(self):
         class FakeContentPreparator:
@@ -403,7 +454,7 @@ class ServerRunnerRoutingTests(unittest.TestCase):
             digest, successful_ids = process_messages(
                 [msg], notes_dir=root / "notes", state_db=root / "state.sqlite", include_plain_emails=True
             )
-            notes = list((root / "notes" / "Emails" / "2026-07").glob("*.md"))
+            notes = list((root / "notes" / "Emails").glob("*/*/*.md"))
 
         self.assertEqual(successful_ids, ["msg-plain-enabled"])
         self.assertEqual(len(notes), 1)

@@ -56,7 +56,19 @@ def channel_slug(value: str) -> str:
 
 
 def _contains_any(haystack: str, needles: set[str]) -> bool:
-    return any(needle in haystack for needle in needles)
+    """Keyword match with word boundaries for short tokens.
+
+    Avoid false positives such as keyword "ai" matching inside "email" while
+    still allowing stem-like terms such as "invest" or "financ" to match.
+    """
+    for needle in needles:
+        escaped = re.escape(needle)
+        if " " in needle or len(needle) <= 3:
+            if re.search(rf"(?<![a-z0-9]){escaped}(?![a-z0-9])", haystack):
+                return True
+        elif needle in haystack:
+            return True
+    return False
 
 
 def classify_youtube_item(item: Mapping[str, Any], *, email_text: str = "") -> dict[str, Any]:
@@ -114,3 +126,99 @@ def folder_parts_for_youtube(classification: Mapping[str, Any]) -> list[str]:
     safe_domain = domain.replace("/", " ").replace("\\", " ")
     safe_channel = channel_name.replace("/", " ").replace("\\", " ")
     return ["YouTube", " ".join(safe_domain.split()), " ".join(safe_channel.split())]
+
+
+PRODUCTIVITY_KEYWORDS = {
+    "productivity", "workflow", "notion", "calendar", "task", "todo", "habit", "focus",
+    "learning", "course", "tutorial", "study", "education", "self-educated", "book", "books",
+    "writing", "research", "knowledge", "notes", "obsidian", "rag", "fine tuning", "fine-tuning",
+}
+
+BUSINESS_KEYWORDS = {
+    "startup", "business", "marketing", "sales", "product", "saas", "customer", "founder",
+    "revenue", "pricing", "growth", "company", "market",
+}
+
+DOMAIN_FALLBACK_BY_HOST = {
+    "github.com": "Technologie",
+    "anthropic.com": "Technologie",
+    "openai.com": "Technologie",
+    "kdnuggets.com": "Technologie",
+    "arxiv.org": "Technologie",
+    "medium.com": "Ostatne",
+    "substack.com": "Ostatne",
+}
+
+
+def _domain_topic_from_corpus(corpus: str, *, host: str = "") -> tuple[str, str, str, float]:
+    """Return (domain, topic, method, confidence) from deterministic rules."""
+    normalized_host = normalize_text(host)
+    for known_host, domain in DOMAIN_FALLBACK_BY_HOST.items():
+        if known_host in normalized_host:
+            return domain, domain, "known_host_map", 0.80
+    if _contains_any(corpus, INVESTMENT_KEYWORDS):
+        return "Investovanie", "Investovanie", "keyword_rule", 0.75
+    if _contains_any(corpus, TECH_KEYWORDS):
+        return "Technologie", "Technologie", "keyword_rule", 0.72
+    if _contains_any(corpus, PRODUCTIVITY_KEYWORDS):
+        return "Produktivita", "Produktivita", "keyword_rule", 0.65
+    if _contains_any(corpus, BUSINESS_KEYWORDS):
+        return "Biznis", "Biznis", "keyword_rule", 0.65
+    return "Ostatne", "Ostatne", "fallback", 0.30
+
+
+def classify_article_item(item: Mapping[str, Any], *, email_text: str = "") -> dict[str, Any]:
+    """Return taxonomy metadata for a generic web article."""
+    from urllib.parse import urlparse
+
+    url = str(item.get("url") or "")
+    host = urlparse(url).netloc.lower().removeprefix("www.")
+    corpus = normalize_text(" ".join([
+        str(item.get("title") or ""),
+        str(item.get("summary") or ""),
+        str(item.get("my_take") or ""),
+        email_text or "",
+        host,
+    ]))
+    domain, topic, method, confidence = _domain_topic_from_corpus(corpus, host=host)
+    return {
+        "domain": domain,
+        "topic": topic,
+        "source_host": host or "unknown-domain",
+        "method": method,
+        "confidence": confidence,
+        "dataset_use": "rag",
+        "source_type": "web_article",
+    }
+
+
+def classify_plain_email_item(item: Mapping[str, Any], *, email_text: str = "") -> dict[str, Any]:
+    """Return taxonomy metadata for an email without supported links."""
+    from_addr = str(item.get("from_addr") or "")
+    corpus = normalize_text(" ".join([
+        str(item.get("subject") or ""),
+        str(item.get("summary") or ""),
+        str(item.get("my_take") or ""),
+        email_text or "",
+        from_addr,
+    ]))
+    domain, topic, method, confidence = _domain_topic_from_corpus(corpus, host=from_addr)
+    return {
+        "domain": domain,
+        "topic": topic,
+        "method": method,
+        "confidence": confidence,
+        "dataset_use": "rag",
+        "source_type": "plain_email",
+    }
+
+
+def folder_parts_for_article(classification: Mapping[str, Any]) -> list[str]:
+    domain = str(classification.get("domain") or "Ostatne").replace("/", " ").replace("\\", " ")
+    host = str(classification.get("source_host") or "unknown-domain").replace("/", " ").replace("\\", " ")
+    return ["Web Articles", " ".join(domain.split()), " ".join(host.split())]
+
+
+def folder_parts_for_plain_email(classification: Mapping[str, Any], month: str) -> list[str]:
+    domain = str(classification.get("domain") or "Ostatne").replace("/", " ").replace("\\", " ")
+    return ["Emails", " ".join(domain.split()), month]
