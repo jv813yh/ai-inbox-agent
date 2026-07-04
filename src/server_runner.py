@@ -233,7 +233,8 @@ def process_messages(
                     note_path=rel_path,
                     first_seen_message_id=msg.id,
                 )
-                digest_lines.append(f"🎥 {item.get('title', 'YouTube video')} → {rel_path}")
+                channel = item.get('channel') or (item.get('classification') or {}).get('channel_name') or 'Unknown Channel'
+                digest_lines.append(f"🎥 {item.get('title', 'YouTube video')} — {channel} → {rel_path}")
                 wrote_anything = True
 
         if github_urls:
@@ -248,7 +249,9 @@ def process_messages(
                     note_path=rel_path,
                     first_seen_message_id=msg.id,
                 )
-                digest_lines.append(f"🐙 {item.get('owner', '')}/{item.get('repo', '')} → {rel_path}")
+                desc = str(item.get('description') or '').strip()
+                desc_suffix = f" — {desc[:120]}" if desc else ""
+                digest_lines.append(f"🐙 {item.get('owner', '')}/{item.get('repo', '')}{desc_suffix} → {rel_path}")
                 wrote_anything = True
 
         if article_urls:

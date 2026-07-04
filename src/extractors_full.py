@@ -5,6 +5,7 @@ With full YouTube transcript extraction
 Prepares data structures for vector database
 """
 
+import html
 import os
 import re
 import json
@@ -85,8 +86,67 @@ class YouTubeExtractor:
         def error(self, _): pass
 
     @staticmethod
+    def _get_oembed_info(url: str) -> Dict:
+        """Fetch lightweight public YouTube oEmbed metadata without an API key."""
+        try:
+            resp = requests.get(
+                "https://www.youtube.com/oembed",
+                params={"url": url, "format": "json"},
+                timeout=10,
+                headers={"User-Agent": WebArticleExtractor._BROWSER_UA if "WebArticleExtractor" in globals() else "Mozilla/5.0"},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return {
+                    "title": data.get("title") or "",
+                    "channel": data.get("author_name") or "",
+                    "author_url": data.get("author_url") or "",
+                    "thumbnail": data.get("thumbnail_url") or "",
+                }
+        except Exception as e:
+            print(f"  ⚠️ YouTube oEmbed metadata failed: {e}")
+        return {}
+
+    @staticmethod
+    def _get_watch_page_info(url: str) -> Dict:
+        """Parse channel/title metadata directly from the public YouTube watch page."""
+        try:
+            resp = requests.get(
+                url,
+                timeout=15,
+                headers={"User-Agent": WebArticleExtractor._BROWSER_UA if "WebArticleExtractor" in globals() else "Mozilla/5.0"},
+            )
+            if resp.status_code != 200:
+                return {}
+            page_html = resp.text
+            patterns = {
+                "channel": [
+                    r'"ownerChannelName"\s*:\s*"([^"]+)"',
+                    r'"author"\s*:\s*"([^"]+)"',
+                    r'<link itemprop="name" content="([^"]+)"',
+                ],
+                "title": [
+                    r'"title"\s*:\s*\{"runs"\s*:\s*\[\{"text"\s*:\s*"([^"]+)"',
+                    r'<meta property="og:title" content="([^"]+)"',
+                ],
+                "channel_id": [r'"externalChannelId"\s*:\s*"([^"]+)"'],
+            }
+            out = {}
+            for key, pats in patterns.items():
+                for pat in pats:
+                    match = re.search(pat, page_html)
+                    if match:
+                        value = html.unescape(match.group(1))
+                        out[key] = value
+                        break
+            return out
+        except Exception as e:
+            print(f"  ⚠️ YouTube watch page metadata failed: {e}")
+            return {}
+
+    @staticmethod
     def get_video_info(url: str) -> Optional[Dict]:
-        """Get YouTube video metadata using yt-dlp, with fallback when blocked."""
+        """Get YouTube video metadata using yt-dlp, with oEmbed fallback for channel/title."""
         print(f"  📥 Fetching video info...")
         try:
             ydl_opts = {
@@ -97,30 +157,41 @@ class YouTubeExtractor:
             }
             with YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
+            channel = info.get('uploader') or info.get('channel') or info.get('creator') or ''
+            title = info.get('title') or ''
+            thumbnail = info.get('thumbnail') or ''
+            if not channel or channel in {'Unknown', 'unknown'}:
+                oembed = YouTubeExtractor._get_oembed_info(url)
+                watch_page = {} if oembed.get('channel') else YouTubeExtractor._get_watch_page_info(url)
+                channel = oembed.get('channel') or watch_page.get('channel') or channel or 'Unknown'
+                title = title or oembed.get('title') or watch_page.get('title') or 'Unknown'
+                thumbnail = thumbnail or oembed.get('thumbnail') or ''
             return {
                 'video_id': info.get('id', ''),
                 'url': url,
-                'title': info.get('title', 'Unknown'),
+                'title': title or 'Unknown',
                 'description': info.get('description', ''),
-                'channel': info.get('uploader', 'Unknown'),
+                'channel': channel or 'Unknown',
                 'duration': info.get('duration', 0),
                 'upload_date': info.get('upload_date', ''),
                 'view_count': info.get('view_count', 0),
-                'thumbnail': info.get('thumbnail', '')
+                'thumbnail': thumbnail
             }
         except Exception as e:
             print(f"  ⚠️ yt-dlp blocked, using fallback: {e}")
             video_id = YouTubeExtractor._extract_video_id(url)
+            oembed = YouTubeExtractor._get_oembed_info(url)
+            watch_page = {} if oembed.get('channel') else YouTubeExtractor._get_watch_page_info(url)
             return {
                 'video_id': video_id or '',
                 'url': url,
-                'title': f'YouTube ({video_id})',
+                'title': oembed.get('title') or watch_page.get('title') or f'YouTube ({video_id})',
                 'description': '',
-                'channel': 'Unknown',
+                'channel': oembed.get('channel') or watch_page.get('channel') or 'Unknown',
                 'duration': 0,
                 'upload_date': '',
                 'view_count': 0,
-                'thumbnail': ''
+                'thumbnail': oembed.get('thumbnail') or ''
             }
 
     @staticmethod
@@ -365,18 +436,35 @@ class GitHubExtractor:
             print(f"  ❌ Error summarizing repo: {e}")
             topics = repo_info.get('topics', []) or []
             topic_text = ", ".join(topics) if topics else "no listed topics"
+            readme = repo_info.get('readme') or ''
+            readme_first_lines = " ".join(
+                line.strip().lstrip('# ').strip()
+                for line in readme.splitlines()[:12]
+                if line.strip()
+            )[:700]
+            why_use = []
+            if repo_info.get('description'):
+                why_use.append(f"- Use it as a reference for: {repo_info.get('description')}.")
+            if topics:
+                why_use.append(f"- Explore implementation patterns around: {topic_text}.")
+            if repo_info.get('language') and repo_info.get('language') != 'Unknown':
+                why_use.append(f"- Inspect the {repo_info.get('language')} codebase for architecture, APIs, and integration patterns you can reuse.")
+            if readme_first_lines:
+                why_use.append(f"- README signal: {readme_first_lines}")
+            if not why_use:
+                why_use.append("- Treat this as a discovery item: inspect stars, issues, examples, and recent commits before spending build time.")
             fallback_summary = (
-                "📌 ONE-LINE SUMMARY: Fallback summary from GitHub metadata because LLM summarization failed.\n\n"
+                "📌 ONE-LINE SUMMARY: GitHub metadata fallback because LLM summarization failed.\n\n"
                 f"🎓 WHAT IS THIS PROJECT?\n"
                 f"{repo_info.get('owner', 'unknown')}/{repo_info.get('repo', 'unknown')} is a "
-                f"{repo_info.get('language', 'Unknown')} project. "
+                f"{repo_info.get('language', 'Unknown')} project with {repo_info.get('stars', 0)} stars and {repo_info.get('forks', 0)} forks. "
                 f"Description: {repo_info.get('description') or 'No description provided.'}\n\n"
-                f"💡 MAIN SIGNALS\n"
-                f"- Stars: {repo_info.get('stars', 0)}\n"
-                f"- Forks: {repo_info.get('forks', 0)}\n"
-                f"- Topics: {topic_text}\n\n"
-                "🚀 HOW TO USE THIS\n"
-                "Open the repository and review the README/source before deciding whether it is useful."
+                f"💡 WHY IT MAY MATTER\n"
+                + "\n".join(why_use[:4])
+                + "\n\n🚀 HOW JOZEF COULD USE THIS\n"
+                "- Extract concrete implementation ideas, API patterns, repo structure, prompts, or automation workflows.\n"
+                "- Compare the project with Jozef's agent/cloud/backend workflows and save only reusable patterns.\n"
+                "- If promising, create a small spike: run the example, inspect open issues, and identify one feature worth copying or improving."
             )
             return {
                 'type': 'github_repo',
@@ -389,7 +477,7 @@ class GitHubExtractor:
                 'language': repo_info.get('language', 'Unknown'),
                 'topics': topics,
                 'summary': fallback_summary,
-                'my_take': '🧠 MY TAKE: LLM summarization failed, so this note was saved with metadata-only analysis for follow-up.',
+                'my_take': '🧠 MY TAKE: LLM summarization failed, but the metadata/README still provide enough signal for a practical triage note. Use this as a candidate for follow-up only if the repo topics, README signal, or implementation patterns match Jozef\'s agent/backend/cloud goals.',
                 'readme_preview': repo_info.get('readme', '')[:500],
                 'processed_at': datetime.now().isoformat(),
                 'source': 'email'
@@ -553,6 +641,13 @@ class ContentPreparator:
             )
             
             if summary:
+                # Preserve metadata fetched outside the LLM call. The writer and
+                # classifier need the real YouTube channel for folder routing;
+                # without this, notes fall back to "Unknown Channel" even when
+                # metadata was available.
+                for key in ['video_id', 'channel', 'duration', 'upload_date', 'view_count', 'thumbnail']:
+                    if video_info.get(key) not in (None, ''):
+                        summary.setdefault(key, video_info.get(key))
                 results.append(summary)
                 print(f"✅ Processed: {summary.get('title', 'Unknown')}")
         

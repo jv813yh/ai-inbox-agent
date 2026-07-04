@@ -249,6 +249,11 @@ Validation infrastructure is the practical wedge.
             self.assertIn("type: github_project", text)
             self.assertIn("owner: jv813yh", text)
             self.assertIn("## What it is", text)
+            self.assertIn("## Practical value for Jozef", text)
+            self.assertIn("Evaluate whether this solves or demonstrates: Email AI agent", text)
+            self.assertIn("Reusable patterns to inspect: agents, gmail", text)
+            self.assertIn("Follow-up for Jozef: extract one concrete backend/cloud/agent workflow idea", text)
+            self.assertNotIn("Review for AI agents / backend / automation ideas", text)
             self.assertIn("[[GitHub Project Index]]", text)
 
             writer.upsert_github_index(item, rel_path)

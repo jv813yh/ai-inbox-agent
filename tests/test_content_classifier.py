@@ -32,6 +32,24 @@ class ContentClassifierTests(unittest.TestCase):
         self.assertEqual(classification["channel_name"], "Some Tech Channel")
         self.assertEqual(folder_parts_for_youtube(classification), ["YouTube", "Technologie", "Some Tech Channel"])
 
+    def test_specific_video_beats_mixed_email_context(self):
+        item = {"channel": "Anthropic", "title": "Prompting 101 | Code w/ Claude"}
+
+        classification = classify_youtube_item(item, email_text="akcie portfolio investovanie ETF")
+
+        self.assertEqual(classification["domain"], "Technologie")
+        self.assertEqual(classification["topic"], "AI Agents")
+        self.assertEqual(classification["channel_name"], "Anthropic")
+        self.assertEqual(folder_parts_for_youtube(classification), ["YouTube", "Technologie", "Anthropic"])
+
+    def test_unknown_video_can_still_use_email_context_as_fallback(self):
+        item = {"channel": "Unknown Channel", "title": "Daily update"}
+
+        classification = classify_youtube_item(item, email_text="ETF portfolio akcie")
+
+        self.assertEqual(classification["domain"], "Investovanie")
+        self.assertEqual(classification["method"], "email_keyword_fallback")
+
     def test_short_ai_keyword_does_not_match_inside_email_word(self):
         from src.content_classifier import classify_plain_email_item
 

@@ -271,6 +271,27 @@ Email source:
 """
         return self._write_note(rel_path, front + "\n\n" + body)
 
+    @staticmethod
+    def _github_practical_value(item: Mapping[str, Any]) -> str:
+        """Create a useful non-generic practical value section for GitHub notes."""
+        description = str(item.get("description") or "").strip()
+        language = str(item.get("language") or "").strip()
+        topics = [str(t).strip() for t in (item.get("topics") or []) if str(t).strip()]
+        readme = str(item.get("readme_preview") or "").strip()
+        bullets: list[str] = []
+        if description:
+            bullets.append(f"- Evaluate whether this solves or demonstrates: {description}")
+        if topics:
+            bullets.append(f"- Reusable patterns to inspect: {', '.join(topics[:8])}.")
+        if language and language != "Unknown":
+            bullets.append(f"- Code angle: inspect the {language} implementation for APIs, architecture, examples, tests, and integration boundaries.")
+        if readme:
+            first_line = next((line.strip().lstrip('# ').strip() for line in readme.splitlines() if line.strip()), "")
+            if first_line:
+                bullets.append(f"- README signal to verify: {first_line[:220]}")
+        bullets.append("- Follow-up for Jozef: extract one concrete backend/cloud/agent workflow idea, not just bookmark the repo.")
+        return "\n".join(bullets)
+
     def write_github_note(
         self,
         item: Mapping[str, Any],
@@ -301,6 +322,7 @@ Email source:
             }
         )
         topics = ", ".join(str(t) for t in item.get("topics", []) or [])
+        practical_value = self._github_practical_value(item)
         body = f"""# {name}
 
 Source: {item.get('url', '')}
@@ -315,7 +337,7 @@ Email source:
 {item.get('my_take', '').strip()}
 
 ## Practical value for Jozef
-- Review for AI agents / backend / automation ideas.
+{practical_value}
 
 ## Repo metadata
 - Stars: {item.get('stars', 0)}

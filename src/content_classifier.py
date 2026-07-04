@@ -14,6 +14,34 @@ from typing import Any, Mapping
 
 
 KNOWN_YOUTUBE_CHANNELS: dict[str, dict[str, Any]] = {
+    "ai engineer": {
+        "domain": "Technologie",
+        "topic": "AI Agents",
+        "channel_name": "AI Engineer",
+        "method": "known_channel_map",
+        "confidence": 0.95,
+    },
+    "anthropic": {
+        "domain": "Technologie",
+        "topic": "AI Agents",
+        "channel_name": "Anthropic",
+        "method": "known_channel_map",
+        "confidence": 0.95,
+    },
+    "austin marchese": {
+        "domain": "Technologie",
+        "topic": "AI Agents",
+        "channel_name": "Austin Marchese",
+        "method": "known_channel_map",
+        "confidence": 0.90,
+    },
+    "sequoia capital": {
+        "domain": "Technologie",
+        "topic": "AI Agents",
+        "channel_name": "Sequoia Capital",
+        "method": "known_channel_map",
+        "confidence": 0.90,
+    },
     "kapitalista": {
         "domain": "Investovanie",
         "topic": "Investovanie",
@@ -79,14 +107,18 @@ def classify_youtube_item(item: Mapping[str, Any], *, email_text: str = "") -> d
     if normalized_channel in KNOWN_YOUTUBE_CHANNELS:
         result = dict(KNOWN_YOUTUBE_CHANNELS[normalized_channel])
     else:
-        corpus = normalize_text(" ".join([
+        item_corpus = normalize_text(" ".join([
             raw_channel,
             str(item.get("title") or ""),
             str(item.get("summary") or ""),
             str(item.get("transcript_preview") or ""),
-            email_text or "",
         ]))
-        if _contains_any(corpus, INVESTMENT_KEYWORDS):
+        email_corpus = normalize_text(email_text or "")
+
+        # Classify primarily from the specific video/channel. A single forwarded
+        # email can contain a mixed list (finance + AI + coding); using the whole
+        # email first misroutes unrelated videos under the wrong domain.
+        if _contains_any(item_corpus, INVESTMENT_KEYWORDS):
             result = {
                 "domain": "Investovanie",
                 "topic": "Investovanie",
@@ -94,13 +126,29 @@ def classify_youtube_item(item: Mapping[str, Any], *, email_text: str = "") -> d
                 "method": "keyword_rule",
                 "confidence": 0.75,
             }
-        elif _contains_any(corpus, TECH_KEYWORDS):
+        elif _contains_any(item_corpus, TECH_KEYWORDS):
             result = {
                 "domain": "Technologie",
                 "topic": "Technologie",
                 "channel_name": raw_channel,
                 "method": "keyword_rule",
                 "confidence": 0.70,
+            }
+        elif _contains_any(email_corpus, INVESTMENT_KEYWORDS):
+            result = {
+                "domain": "Investovanie",
+                "topic": "Investovanie",
+                "channel_name": raw_channel,
+                "method": "email_keyword_fallback",
+                "confidence": 0.55,
+            }
+        elif _contains_any(email_corpus, TECH_KEYWORDS):
+            result = {
+                "domain": "Technologie",
+                "topic": "Technologie",
+                "channel_name": raw_channel,
+                "method": "email_keyword_fallback",
+                "confidence": 0.55,
             }
         else:
             result = {

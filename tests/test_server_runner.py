@@ -208,6 +208,7 @@ class ServerRunnerRoutingTests(unittest.TestCase):
         self.assertEqual(len(FakeContentPreparator.seen_urls), 1)
         self.assertEqual(successful_ids, ["msg-dupe-video"])
         self.assertIn("One Video", digest)
+        self.assertIn("— Channel →", digest)
 
     def test_process_messages_classifies_youtube_items_before_writing_notes(self):
         class FakeContentPreparator:
