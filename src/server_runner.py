@@ -363,6 +363,107 @@ def index_humanagentwiki(humanagentwiki_dir: str | Path, notes_dir: str | Path, 
         return False, f"HumanAgentWiki index failed: {exc}; note files are saved and indexing is queued for later"
 
 
+def _extract_frontmatter(text: str) -> dict[str, str]:
+    if not text.startswith("---\n"):
+        return {}
+    end = text.find("\n---\n", 4)
+    if end < 0:
+        return {}
+    values: dict[str, str] = {}
+    for raw in text[4:end].splitlines():
+        if ":" not in raw:
+            continue
+        key, value = raw.split(":", 1)
+        value = value.strip().strip('"')
+        if key.strip():
+            values[key.strip()] = value
+    return values
+
+
+def _extract_markdown_section(text: str, heading: str) -> str:
+    pattern = re.compile(rf"^##\s+{re.escape(heading)}\s*$", re.MULTILINE)
+    match = pattern.search(text or "")
+    if not match:
+        return ""
+    next_heading = re.search(r"^##\s+", text[match.end():], re.MULTILINE)
+    end = match.end() + next_heading.start() if next_heading else len(text)
+    return text[match.end():end].strip()
+
+
+def _first_nonempty_lines(text: str, *, max_lines: int = 4) -> list[str]:
+    lines: list[str] = []
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("```"):
+            continue
+        lines.append(line)
+        if len(lines) >= max_lines:
+            break
+    return lines
+
+
+def _note_paths_from_digest(digest: str) -> list[str]:
+    """Extract relative HumanAgentWiki note paths emitted in digest lines."""
+    paths: list[str] = []
+    pattern = re.compile(r"(?:→|->)\s+([^\n`]+?\.md)(?=$|\n)")
+    for match in pattern.finditer(digest or ""):
+        rel = match.group(1).strip().strip("`")
+        if rel.startswith(("http://", "https://")):
+            continue
+        if rel not in paths:
+            paths.append(rel)
+    return paths
+
+
+def _summarize_note_for_outcome(notes_dir: str | Path, rel_path: str) -> str:
+    root = Path(notes_dir).expanduser().resolve()
+    path = (root / rel_path).resolve()
+    if root not in path.parents or not path.exists():
+        return f"## {rel_path}\n**Status:** note not found for outcome.\n"
+    text = path.read_text(encoding="utf-8")
+    meta = _extract_frontmatter(text)
+    title = meta.get("title") or path.stem.replace("-", " ").title()
+    source = meta.get("channel") or meta.get("source_host") or meta.get("owner") or meta.get("from_addr") or meta.get("category") or "HumanAgentWiki"
+    domain = meta.get("domain") or meta.get("topic") or meta.get("category") or ""
+    summary = _extract_markdown_section(text, "Summary")
+    key_points = _extract_markdown_section(text, "Key points") or _extract_markdown_section(text, "KEY TAKEAWAYS")
+    action = _extract_markdown_section(text, "Actionable ideas") or _extract_markdown_section(text, "HOW TO APPLY THIS IN PRACTICE")
+    if not key_points:
+        key_points = summary
+    if not action:
+        action = _extract_markdown_section(text, "My take") or summary
+    what_it_is = " ".join(_first_nonempty_lines(summary, max_lines=2))[:420]
+    point_lines = _first_nonempty_lines(key_points, max_lines=4)
+    action_lines = _first_nonempty_lines(action, max_lines=3)
+    out = [
+        f"## {title}",
+        f"**Status:** in HumanAgentWiki",
+        f"**Source:** {source}{(' · ' + domain) if domain else ''}",
+        f"**Note:** `{rel_path}`",
+        "",
+    ]
+    if what_it_is:
+        out.extend(["**What it is:**", what_it_is, ""])
+    if point_lines:
+        out.append("**Key points:**")
+        out.extend(line if line.startswith("-") else f"- {line}" for line in point_lines)
+        out.append("")
+    if action_lines:
+        out.append("**What you should take from it:**")
+        out.extend(line if line.startswith("-") else f"- {line}" for line in action_lines)
+        out.append("")
+    return "\n".join(out).strip()
+
+
+def build_outcome_report(notes_dir: str | Path, digest: str) -> str:
+    """Build a compact practical outcome report from note paths in a digest."""
+    paths = [p for p in _note_paths_from_digest(digest) if not p.startswith("Daily Personal AI news/")]
+    if not paths:
+        return ""
+    sections = [_summarize_note_for_outcome(notes_dir, rel) for rel in paths]
+    return "## Outcome\n\n" + "\n\n".join(sections)
+
+
 def write_daily_personal_ai_news_report(
     notes_dir: str | Path,
     digest: str,
@@ -427,6 +528,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Also summarize long unread emails with no links. Enabled by default for the dedicated learning Gmail account.",
     )
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--with-outcome",
+        action="store_true",
+        help="After the digest, print a compact practical outcome summary from created HumanAgentWiki notes.",
+    )
     return parser
 
 
@@ -459,6 +565,11 @@ def main() -> int:
         print(digest)
         if report_rel_path:
             print(f"\n🗞️ Saved daily AI news digest → {report_rel_path}")
+        if args.with_outcome:
+            outcome = build_outcome_report(args.notes_dir, digest)
+            if outcome:
+                print()
+                print(outcome)
         if args.dry_run:
             print("\nDRY RUN: no notes/state/email-read changes applied.")
     return 0
