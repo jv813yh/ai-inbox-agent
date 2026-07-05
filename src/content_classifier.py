@@ -42,6 +42,48 @@ KNOWN_YOUTUBE_CHANNELS: dict[str, dict[str, Any]] = {
         "method": "known_channel_map",
         "confidence": 0.90,
     },
+    "computerphile": {
+        "domain": "Technologie",
+        "topic": "Computer Science",
+        "channel_name": "Computerphile",
+        "method": "known_channel_map",
+        "confidence": 0.92,
+    },
+    "jean lee": {
+        "domain": "Technologie",
+        "topic": "Software Engineering",
+        "channel_name": "Jean Lee",
+        "method": "known_channel_map",
+        "confidence": 0.90,
+    },
+    "chase ai": {
+        "domain": "Technologie",
+        "topic": "AI Agents",
+        "channel_name": "Chase AI",
+        "method": "known_channel_map",
+        "confidence": 0.92,
+    },
+    "nate herk | ai automation": {
+        "domain": "Technologie",
+        "topic": "AI Automation",
+        "channel_name": "Nate Herk | AI Automation",
+        "method": "known_channel_map",
+        "confidence": 0.92,
+    },
+    "google cloud tech": {
+        "domain": "Technologie",
+        "topic": "Cloud AI",
+        "channel_name": "Google Cloud Tech",
+        "method": "known_channel_map",
+        "confidence": 0.92,
+    },
+    "greg isenberg": {
+        "domain": "Technologie",
+        "topic": "AI Business",
+        "channel_name": "Greg Isenberg",
+        "method": "known_channel_map",
+        "confidence": 0.90,
+    },
     "kapitalista": {
         "domain": "Investovanie",
         "topic": "Investovanie",
@@ -59,7 +101,8 @@ KNOWN_YOUTUBE_CHANNELS: dict[str, dict[str, Any]] = {
 }
 
 INVESTMENT_KEYWORDS = {
-    "invest", "investovanie", "akcie", "akcia", "etf", "portfolio", "dividendy",
+    "investovanie", "investing", "investor", "investori", "investič", "investic",
+    "akcie", "akcia", "etf", "portfolio", "dividendy", "trading", "trader",
     "trhy", "burza", "dlhopisy", "crypto", "krypto", "bitcoin", "financ", "kapital",
 }
 
