@@ -73,6 +73,18 @@ class ContentClassifierTests(unittest.TestCase):
 
         self.assertEqual(classification["domain"], "Technologie")
 
+    def test_article_host_beats_mixed_email_context(self):
+        from src.content_classifier import classify_article_item
+
+        classification = classify_article_item({
+            "url": "https://techcommunity.microsoft.com/blog/azuredevcommunityblog/the-future-of-agentic-ai-inside-microsoft-agent-framework-1-0/4510698",
+            "title": "The Future of Agentic AI: Inside Microsoft Agent Framework 1.0",
+            "summary": "Microsoft released an agent framework for Python and .NET.",
+        }, email_text="akcie portfolio investovanie ETF trader")
+
+        self.assertEqual(classification["domain"], "Technologie")
+        self.assertEqual(classification["method"], "known_host_map")
+
 
 if __name__ == "__main__":
     unittest.main()
