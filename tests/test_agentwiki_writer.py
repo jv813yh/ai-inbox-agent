@@ -126,6 +126,80 @@ Validation infrastructure is the practical wedge.
             self.assertNotIn("## Entities\n\n## Claims", text)
             self.assertNotIn("## Claims\n\n## Actionable ideas", text)
 
+    def test_writes_ai_learning_note_from_learning_worthy_youtube_summary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            notes_dir = Path(tmp)
+            writer = AgentWikiWriter(notes_dir)
+            item = {
+                "url": "https://www.youtube.com/watch?v=learn123456",
+                "video_id": "learn123456",
+                "title": "How to Design Agent Skills",
+                "channel": "Agent Lab",
+                "summary": """🔑 KEY TAKEAWAYS
+- A good agent skill has trigger conditions, exact steps, pitfalls, and verification.
+- Save reusable workflows as procedural memory instead of relying on chat history.
+
+🚀 HOW TO APPLY THIS IN PRACTICE
+- Write a SKILL.md with frontmatter, step-by-step workflow, and verification checklist.
+- Link the skill back to the source video and note why it was extracted.
+""",
+                "model": "claude-opus-4-6",
+                "processed_at": "2026-07-05T12:00:00+00:00",
+                "classification": {
+                    "domain": "Technologie",
+                    "topic": "AI Agents",
+                    "channel_name": "Agent Lab",
+                    "channel_slug": "agent-lab",
+                    "dataset_use": "rag",
+                    "source_type": "youtube",
+                    "method": "keyword_rule",
+                    "confidence": 0.8,
+                },
+            }
+            source_rel = "YouTube/Technologie/Agent Lab/2026-07-05--learn123456--how-to-design-agent-skills.md"
+
+            learning_rel = writer.write_learning_note_if_useful(
+                item,
+                source_rel_path=source_rel,
+                source_type="youtube_video",
+                gmail_account="learning",
+            )
+
+            self.assertIsNotNone(learning_rel)
+            self.assertTrue(learning_rel.startswith("AI Learning System/Technologie/"))
+            text = (notes_dir / learning_rel).read_text(encoding="utf-8")
+            self.assertIn("category: AI Learning System", text)
+            self.assertIn("type: ai_learning_note", text)
+            self.assertIn("source_note: \"YouTube/Technologie/Agent Lab/2026-07-05--learn123456--how-to-design-agent-skills.md\"", text)
+            self.assertIn("source_type: youtube_video", text)
+            self.assertIn("processed_by_model: claude-opus-4-6", text)
+            self.assertIn("extraction_reason:", text)
+            self.assertIn("## Learning artifact", text)
+            self.assertIn("A good agent skill has trigger conditions", text)
+            self.assertIn("## Source linkage", text)
+            self.assertIn("[[How to Design Agent Skills]]", text)
+            self.assertIn("[[AI Learning System Index]]", text)
+
+    def test_skips_ai_learning_note_when_summary_has_no_reusable_learning_signal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = AgentWikiWriter(Path(tmp))
+            item = {
+                "url": "https://example.com/news",
+                "title": "Short Market News",
+                "summary": "A short news update without reusable process or learning detail.",
+                "processed_at": "2026-07-05T12:00:00+00:00",
+                "classification": {"domain": "Ostatne", "topic": "News"},
+            }
+
+            learning_rel = writer.write_learning_note_if_useful(
+                item,
+                source_rel_path="Web Articles/Ostatne/example.com/news.md",
+                source_type="web_article",
+                gmail_account="learning",
+            )
+
+            self.assertIsNone(learning_rel)
+
     def test_writes_investment_youtube_note_under_channel_folder(self):
         with tempfile.TemporaryDirectory() as tmp:
             notes_dir = Path(tmp)

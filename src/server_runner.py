@@ -226,6 +226,14 @@ def process_messages(
                 item.setdefault("classification", classify_youtube_item(item, email_text=email_text))
                 rel_path = writer.write_youtube_note(item, email_meta=msg.email_meta, gmail_account=gmail_account)
                 writer.upsert_youtube_index(item, rel_path)
+                learning_rel = writer.write_learning_note_if_useful(
+                    item,
+                    source_rel_path=rel_path,
+                    source_type="youtube_video",
+                    gmail_account=gmail_account,
+                )
+                if learning_rel:
+                    writer.upsert_learning_index(item, learning_rel, rel_path)
                 store.record_source(
                     source_type="youtube",
                     source_id=str(item.get("video_id") or source_id_for_youtube_url(str(item.get("url", "")))),
@@ -235,6 +243,8 @@ def process_messages(
                 )
                 channel = item.get('channel') or (item.get('classification') or {}).get('channel_name') or 'Unknown Channel'
                 digest_lines.append(f"🎥 {item.get('title', 'YouTube video')} — {channel} → {rel_path}")
+                if learning_rel:
+                    digest_lines.append(f"🧠 Learning → {learning_rel}")
                 wrote_anything = True
 
         if github_urls:
@@ -260,6 +270,14 @@ def process_messages(
                 item.setdefault("classification", classify_article_item(item, email_text=email_text))
                 rel_path = writer.write_article_note(item, email_meta=msg.email_meta, gmail_account=gmail_account)
                 writer.upsert_article_index(item, rel_path)
+                learning_rel = writer.write_learning_note_if_useful(
+                    item,
+                    source_rel_path=rel_path,
+                    source_type="web_article",
+                    gmail_account=gmail_account,
+                )
+                if learning_rel:
+                    writer.upsert_learning_index(item, learning_rel, rel_path)
                 store.record_source(
                     source_type="article",
                     source_id=source_id_for_article_url(str(item.get("url", ""))),
@@ -268,6 +286,8 @@ def process_messages(
                     first_seen_message_id=msg.id,
                 )
                 digest_lines.append(f"📰 {item.get('title', 'Web article')} → {rel_path}")
+                if learning_rel:
+                    digest_lines.append(f"🧠 Learning → {learning_rel}")
                 wrote_anything = True
 
         if plain_candidate and not has_links:

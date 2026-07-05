@@ -251,6 +251,68 @@ class ServerRunnerRoutingTests(unittest.TestCase):
         self.assertIn("YouTube/Investovanie/Kapitalista/", digest)
 
 
+    def test_process_messages_writes_ai_learning_note_for_learning_worthy_youtube(self):
+        class FakeContentPreparator:
+            @staticmethod
+            def prepare_youtube_batch(urls, email_body=""):
+                return [
+                    {
+                        "url": urls[0],
+                        "video_id": "learn123456",
+                        "title": "How to Design Agent Skills",
+                        "channel": "Agent Lab",
+                        "summary": """🔑 KEY TAKEAWAYS
+- A good agent skill has trigger conditions, exact steps, pitfalls, and verification.
+
+🚀 HOW TO APPLY THIS IN PRACTICE
+- Write a SKILL.md with frontmatter, workflow steps, and verification checklist.
+- Link extracted learning back to the source note.
+""",
+                        "model": "claude-opus-4-6",
+                        "processed_at": "2026-07-05T12:00:00+00:00",
+                        "classification": {
+                            "domain": "Technologie",
+                            "topic": "AI Agents",
+                            "channel_name": "Agent Lab",
+                            "channel_slug": "agent-lab",
+                            "dataset_use": "rag",
+                            "source_type": "youtube",
+                            "method": "keyword_rule",
+                            "confidence": 0.8,
+                        },
+                    }
+                ]
+
+            @staticmethod
+            def prepare_github_batch(urls):
+                return []
+
+            @staticmethod
+            def prepare_article_batch(urls, **kwargs):
+                return []
+
+        with tempfile.TemporaryDirectory() as tmp, patch("src.server_runner._lazy_content_preparator", return_value=FakeContentPreparator):
+            root = Path(tmp)
+            msg = GmailMessage(
+                id="msg-learning-video",
+                thread_id="thread-1",
+                subject="Learning video",
+                from_addr="sender@example.com",
+                date="today",
+                body="https://youtu.be/learn123456",
+            )
+
+            digest, successful_ids = process_messages([msg], notes_dir=root / "notes", state_db=root / "state.sqlite")
+            learning_notes = list((root / "notes" / "AI Learning System" / "Technologie").glob("*.md"))
+            learning_text = learning_notes[0].read_text(encoding="utf-8") if learning_notes else ""
+
+        self.assertEqual(successful_ids, ["msg-learning-video"])
+        self.assertEqual(len(learning_notes), 1)
+        self.assertIn("source_type: youtube_video", learning_text)
+        self.assertIn("processed_by_model: claude-opus-4-6", learning_text)
+        self.assertIn("Source note:", learning_text)
+        self.assertIn("🧠 Learning → AI Learning System/Technologie/", digest)
+
     def test_process_messages_routes_article_links_and_writes_notes(self):
         class FakeContentPreparator:
             seen_urls = []
