@@ -7,6 +7,8 @@ from unittest.mock import patch
 from src.gmail_api_client import GmailMessage
 from src.server_runner import (
     DEFAULT_QUERY,
+    build_arg_parser,
+    build_outcome_report,
     classify_links,
     process_messages,
     source_id_for_article_url,
@@ -20,6 +22,11 @@ from src.state_store import StateStore
 class ServerRunnerRoutingTests(unittest.TestCase):
     def test_default_query_reads_all_unread_learning_inbox(self):
         self.assertEqual(DEFAULT_QUERY, "in:inbox is:unread newer_than:30d")
+
+    def test_parser_accepts_with_outcome_flag(self):
+        args = build_arg_parser().parse_args(["--with-outcome"])
+
+        self.assertTrue(args.with_outcome)
 
     def test_classifies_youtube_and_github_links_from_email_body(self):
         body = """
@@ -74,6 +81,45 @@ class ServerRunnerRoutingTests(unittest.TestCase):
             self.assertIn("category: Daily Personal AI news", text)
             self.assertIn("📬 AI Inbox Agent", text)
             self.assertIn("🎥 Item", text)
+
+    def test_build_outcome_report_summarizes_note_paths_from_digest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            notes_dir = Path(tmp)
+            note = notes_dir / "YouTube" / "Technologie" / "Agent Lab" / "video.md"
+            note.parent.mkdir(parents=True)
+            note.write_text(
+                """---
+title: Build Useful AI Agents
+category: YouTube
+domain: Technologie
+topic: AI Agents
+channel: Agent Lab
+---
+
+# Build Useful AI Agents
+
+## Summary
+This video explains how to build production AI agents by starting with one narrow workflow, adding evals, and keeping human approval for risky actions.
+
+## Key points
+- Start with a narrow workflow.
+- Add logs, evals, and approval flows.
+- Expand autonomy only after evidence.
+
+## Actionable ideas
+- Create a 50-case eval set from real user requests.
+- Ship a dashboard that shows each agent action and why it happened.
+""",
+                encoding="utf-8",
+            )
+            digest = "🎥 Build Useful AI Agents — Agent Lab → YouTube/Technologie/Agent Lab/video.md"
+
+            outcome = build_outcome_report(notes_dir, digest)
+
+        self.assertIn("## Outcome", outcome)
+        self.assertIn("Build Useful AI Agents", outcome)
+        self.assertIn("Start with a narrow workflow", outcome)
+        self.assertIn("Create a 50-case eval set", outcome)
 
     def test_main_saves_daily_personal_ai_news_report_after_successful_index(self):
         from src import server_runner
