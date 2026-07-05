@@ -62,6 +62,31 @@ class ContentClassifierTests(unittest.TestCase):
 
         self.assertEqual(classification["domain"], "Ostatne")
 
+    def test_known_technology_learning_channels_route_to_technologie(self):
+        cases = [
+            ("Computerphile", "Why AI Tokens are so Expensive"),
+            ("Jean Lee", "Should You Still Become a Software Engineer in 2026? GitHub VP"),
+            ("Chase AI", "The Agentic OS Setup That Will 10x Claude Code"),
+            ("Nate Herk | AI Automation", "How to Build Effective Claude Code Agents in 2026"),
+            ("Google Cloud Tech", "MCP vs API: Why traditional APIs are failing AI agents"),
+            ("Greg Isenberg", "Learn AI Is Bad Advice. Learn This Instead"),
+        ]
+
+        for channel, title in cases:
+            with self.subTest(channel=channel):
+                classification = classify_youtube_item({"channel": channel, "title": title}, email_text="akcie portfolio investovanie ETF")
+                self.assertEqual(classification["domain"], "Technologie")
+                self.assertEqual(classification["method"], "known_channel_map")
+
+    def test_generic_invest_word_without_finance_context_does_not_route_to_investovanie(self):
+        classification = classify_youtube_item({
+            "channel": "Engineering Mentor",
+            "title": "Should You Still Become a Software Engineer in 2026",
+            "summary": "Companies should invest in mentorship and CI/CD for AI generated code.",
+        }, email_text="")
+
+        self.assertEqual(classification["domain"], "Technologie")
+
     def test_article_classifier_routes_agentic_ai_to_technologie(self):
         from src.content_classifier import classify_article_item
 
