@@ -144,6 +144,54 @@ def _youtube_structured_sections(item: Mapping[str, Any], classification: Mappin
     }
 
 
+_LEARNING_KEYWORDS = {
+    "skill", "skills", "checklist", "workflow", "playbook", "runbook", "step-by-step",
+    "fine tuning", "fine-tuning", "finetuning", "dataset", "evaluation", "benchmark",
+    "agent", "agents", "automation", "orchestration", "architecture", "pattern", "framework",
+    "debugging", "testing", "deploy", "production", "prompt", "rag", "mcp",
+}
+
+
+def _learning_signal(summary: str) -> tuple[bool, str]:
+    """Detect whether a summary contains reusable learning/process content."""
+    lower = summary.lower()
+    matched = sorted({kw for kw in _LEARNING_KEYWORDS if kw in lower})
+    has_action_section = bool(
+        _extract_summary_section(summary, "HOW TO APPLY THIS IN PRACTICE")
+        or _extract_summary_section(summary, "ACTIONABLE IDEAS")
+        or _extract_summary_section(summary, "MAIN LEARNING OBJECTIVES")
+    )
+    has_enough_signal = len(matched) >= 2 or (has_action_section and matched)
+    if not has_enough_signal:
+        return False, ""
+    reason_bits = []
+    if matched:
+        reason_bits.append("matched learning keywords: " + ", ".join(matched[:8]))
+    if has_action_section:
+        reason_bits.append("contains actionable learning/application sections")
+    return True, "; ".join(reason_bits)
+
+
+def _learning_artifact(summary: str) -> str:
+    """Return compact reusable learning content from an existing summary."""
+    parts: list[str] = []
+    for label, headers in [
+        ("Key ideas", ("KEY TAKEAWAYS", "MAIN LEARNING OBJECTIVES")),
+        ("Procedure / application", ("HOW TO APPLY THIS IN PRACTICE", "ACTIONABLE IDEAS")),
+        ("Detailed notes", ("DETAILED NOTES",)),
+    ]:
+        section = ""
+        for header in headers:
+            section = _extract_summary_section(summary, header)
+            if section:
+                break
+        if section:
+            parts.append(f"### {label}\n{section.strip()}")
+    if not parts:
+        parts.append(_first_non_empty_lines(summary, limit=6))
+    return "\n\n".join(part for part in parts if part).strip()
+
+
 class AgentWikiWriter:
     """Safe writer for HumanAgentWiki Markdown notes and index notes."""
 
@@ -184,6 +232,77 @@ class AgentWikiWriter:
         if isinstance(existing, Mapping):
             return existing
         return classify_youtube_item(item)
+
+    def write_learning_note_if_useful(
+        self,
+        item: Mapping[str, Any],
+        *,
+        source_rel_path: str,
+        source_type: str,
+        gmail_account: str,
+    ) -> str | None:
+        """Write a reusable AI Learning System note when source content has learning signal.
+
+        This is deterministic and uses the already-generated source summary; it does
+        not make another LLM call. The note is linked back to the original source note
+        so RAG can trace where the learning came from.
+        """
+        summary = str(item.get("summary") or "")
+        should_write, reason = _learning_signal(summary)
+        if not should_write:
+            return None
+
+        classification = item.get("classification") if isinstance(item.get("classification"), Mapping) else {}
+        domain = str(classification.get("domain") or item.get("domain") or "Ostatne")
+        topic = str(classification.get("topic") or item.get("topic") or domain)
+        title = str(item.get("title") or item.get("subject") or item.get("url") or "Learning note")
+        date_prefix = str(item.get("processed_at", ""))[:10] or "undated"
+        source_id = str(item.get("video_id") or item.get("url") or title)
+        rel_path = f"AI Learning System/{domain}/{date_prefix}--{slugify(source_id, max_length=32)}--{slugify(title)}.md"
+        artifact = _learning_artifact(summary)
+        processed_by_model = str(item.get("model") or item.get("processed_by_model") or "ai-inbox-agent summarizer")
+
+        front = _frontmatter(
+            {
+                "title": title,
+                "category": "AI Learning System",
+                "type": "ai_learning_note",
+                "tags": ["ai-learning", "learning-system", "ai-inbox", domain],
+                "domain": domain,
+                "topic": topic,
+                "source_note": source_rel_path,
+                "source_url": item.get("url", ""),
+                "source_type": source_type,
+                "source_title": title,
+                "processed_by_model": processed_by_model,
+                "extracted_by": "ai-inbox-agent learning extractor",
+                "extraction_reason": reason,
+                "dataset_use": "rag",
+                "gmail_account": gmail_account,
+                "processed_at": item.get("processed_at", ""),
+            }
+        )
+        # Quote source_note for readability/path safety in frontmatter snapshots.
+        front = front.replace(f"source_note: {source_rel_path}", f"source_note: \"{source_rel_path}\"")
+        body = f"""# {title}
+
+## Learning artifact
+{artifact}
+
+## Why this was extracted
+{reason}
+
+## Source linkage
+- Source note: `{source_rel_path}`
+- Source type: {source_type}
+- Source URL: {item.get('url', '')}
+- Processed by model: {processed_by_model}
+
+## Related
+- [[{title}]]
+- [[AI Learning System Index]]
+"""
+        return self._write_note(rel_path, front + "\n\n" + body)
 
     def write_youtube_note(
         self,
@@ -516,6 +635,14 @@ Email source:
         subject = str(item.get("subject") or "Email")
         entry = f"- [[{subject}]] — {item.get('from_addr', 'Unknown')} — `{rel_note_path}`"
         return self._upsert_index("Indexes/plain-email-index.md", "Plain Email Index", ["index", "email", "ai-inbox"], entry)
+
+    def upsert_learning_index(self, item: Mapping[str, Any], rel_note_path: str, source_rel_path: str) -> str:
+        title = str(item.get("title") or item.get("subject") or item.get("url") or "Learning note")
+        classification = item.get("classification") if isinstance(item.get("classification"), Mapping) else {}
+        domain = str(classification.get("domain") or item.get("domain") or "Ostatne")
+        topic = str(classification.get("topic") or item.get("topic") or domain)
+        entry = f"- [[{title}]] — {domain} / {topic} — source `{source_rel_path}` — `{rel_note_path}`"
+        return self._upsert_index("Indexes/ai-learning-system-index.md", "AI Learning System Index", ["index", "ai-learning", "ai-inbox"], entry)
 
     def _upsert_index(self, rel_path: str, title: str, tags: list[str], entry: str) -> str:
         path = self._safe_path(rel_path)
