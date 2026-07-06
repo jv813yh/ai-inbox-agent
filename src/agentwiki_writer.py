@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+import posixpath
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlparse
@@ -213,6 +214,85 @@ class AgentWikiWriter:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content.rstrip() + "\n", encoding="utf-8")
         return path.relative_to(self.notes_dir).as_posix()
+
+    @staticmethod
+    def _read_frontmatter(path: Path) -> tuple[dict[str, str], str]:
+        raw = path.read_text(encoding="utf-8")
+        if not raw.startswith("---\n"):
+            return {}, raw
+        end = raw.find("\n---", 4)
+        if end == -1:
+            return {}, raw
+        fm: dict[str, str] = {}
+        for line in raw[4:end].splitlines():
+            if ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            text = value.strip()
+            if len(text) >= 2 and text[0] == text[-1] == '"':
+                text = text[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+            fm[key.strip()] = text
+        return fm, raw[end + 4 :].lstrip()
+
+    @staticmethod
+    def _extract_markdown_section(body: str, heading: str) -> str:
+        pattern = re.compile(
+            rf"^##\s+{re.escape(heading)}\s*$([\s\S]*?)(?=^##\s+|\Z)",
+            re.IGNORECASE | re.MULTILINE,
+        )
+        match = pattern.search(body)
+        return match.group(1).strip() if match else ""
+
+    @staticmethod
+    def _compact_preview(text: str, *, max_length: int = 220) -> str:
+        lines = [line.strip().lstrip("- ").strip() for line in text.splitlines() if line.strip()]
+        lines = [line for line in lines if not re.fullmatch(r"[^A-Za-z0-9]*[A-Z0-9][A-Z0-9 ./'-]*:?", line)]
+        preview = " ".join(lines[:2]).strip()
+        if len(preview) > max_length:
+            return preview[: max_length - 1].rstrip() + "..."
+        return preview
+
+    @staticmethod
+    def _first_bullet_lines(text: str, *, limit: int = 2) -> list[str]:
+        bullets: list[str] = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith("- "):
+                bullets.append(stripped)
+            elif bullets:
+                break
+            if len(bullets) >= limit:
+                break
+        return bullets
+
+    @classmethod
+    def _channel_video_detail_lines(cls, body: str) -> list[str]:
+        """Return compact, structured lines for a video inside its channel hub."""
+        summary = cls._extract_markdown_section(body, "Summary")
+        about = (
+            _extract_summary_section(summary, "WHAT IS THIS VIDEO ABOUT")
+            or cls._compact_preview(summary, max_length=260)
+        )
+        key_points = cls._extract_markdown_section(body, "Key points") or _extract_summary_section(summary, "KEY TAKEAWAYS")
+        actionable = cls._extract_markdown_section(body, "Actionable ideas") or _extract_summary_section(
+            summary, "ACTIONABLE IDEAS", "HOW TO APPLY THIS IN PRACTICE"
+        )
+
+        lines: list[str] = []
+        about_preview = cls._compact_preview(about, max_length=280)
+        if about_preview:
+            lines.append(f"  - **Summary:** {about_preview}")
+        key_bullets = cls._first_bullet_lines(key_points, limit=2)
+        if key_bullets:
+            lines.append("  - **Key points:**")
+            lines.extend(f"    {bullet}" for bullet in key_bullets)
+        action_bullets = cls._first_bullet_lines(actionable, limit=2)
+        if action_bullets:
+            lines.append("  - **Actionable ideas:**")
+            lines.extend(f"    {bullet}" for bullet in action_bullets)
+        return lines
 
     @staticmethod
     def _email_source(email_meta: Mapping[str, Any]) -> str:
@@ -619,7 +699,91 @@ Email source:
             entry,
         )
         self._upsert_index("Indexes/youtube-video-index.md", "YouTube Video Index", ["index", "youtube", "ai-inbox"], entry)
+        self.upsert_youtube_channel_index(item, rel_note_path)
         return domain_index
+
+    def upsert_youtube_channel_index(self, item: Mapping[str, Any], rel_note_path: str) -> str:
+        classification = self._youtube_classification(item)
+        channel_name = str(classification.get("channel_name") or item.get("channel") or "Unknown Channel")
+        channel_slug = str(classification.get("channel_slug") or slugify(channel_name, fallback="unknown-channel"))
+        videos: list[dict[str, Any]] = []
+        youtube_root = self.notes_dir / "YouTube"
+        if youtube_root.exists():
+            for path in sorted(youtube_root.rglob("*.md")):
+                fm, body = self._read_frontmatter(path)
+                if (fm.get("channel_slug") or "") != channel_slug and (fm.get("channel") or "") != channel_name:
+                    continue
+                rel = path.relative_to(self.notes_dir).as_posix()
+                detail_lines = self._channel_video_detail_lines(body)
+                videos.append(
+                    {
+                        "title": fm.get("title") or path.stem,
+                        "rel_path": rel,
+                        "href": posixpath.relpath(rel, start="YouTube Channels"),
+                        "source_url": fm.get("source_url") or "",
+                        "domain": fm.get("domain") or fm.get("topic") or "Ostatne",
+                        "topic": fm.get("topic") or "",
+                        "video_id": fm.get("video_id") or "",
+                        "transcript": fm.get("transcript_available") or "false",
+                        "detail_lines": detail_lines,
+                    }
+                )
+
+        if not any(v["rel_path"] == rel_note_path for v in videos):
+            title = str(item.get("title") or item.get("url") or "YouTube Video")
+            videos.append(
+                {
+                    "title": title,
+                    "rel_path": rel_note_path,
+                    "href": posixpath.relpath(rel_note_path, start="YouTube Channels"),
+                    "source_url": str(item.get("url") or ""),
+                    "domain": str(classification.get("domain") or "Ostatne"),
+                    "topic": str(classification.get("topic") or ""),
+                    "video_id": str(item.get("video_id") or ""),
+                    "transcript": "true" if item.get("has_full_transcript") else "false",
+                    "detail_lines": self._channel_video_detail_lines(f"## Summary\n{str(item.get('summary') or '').strip()}"),
+                }
+            )
+
+        videos.sort(key=lambda v: (v["domain"], v["title"].lower(), v["rel_path"]))
+        domains = sorted({v["domain"] for v in videos if v["domain"]})
+        front = _frontmatter(
+            {
+                "title": f"YouTube Channel - {channel_name}",
+                "category": "YouTube Channels",
+                "type": "hub",
+                "channel": channel_name,
+                "channel_slug": channel_slug,
+                "video_count": len(videos),
+                "domains": domains,
+                "source_type": "youtube_channel_index",
+                "dataset_use": "rag",
+            }
+        )
+        video_lines: list[str] = []
+        for video in videos:
+            source = f" — Source: {video['source_url']}" if video["source_url"] else ""
+            topic = f" / {video['topic']}" if video["topic"] and video["topic"] != video["domain"] else ""
+            video_lines.append(
+                f"- [{video['title']}]({video['href']}){source} — `{video['domain']}{topic}` — transcript: `{video['transcript']}`"
+            )
+            for detail_line in video.get("detail_lines") or []:
+                video_lines.append(str(detail_line))
+
+        body = f"""# YouTube Channel - {channel_name}
+
+Channel slug: `{channel_slug}`
+Video count: **{len(videos)}**
+
+## Videos
+{chr(10).join(video_lines) if video_lines else "- No videos indexed yet."}
+
+## Filter/search helpers
+- channel: `{channel_name}`
+- channel_slug: `{channel_slug}`
+- source_type: `youtube_channel_index`
+"""
+        return self._write_note(f"YouTube Channels/{channel_slug}.md", front + "\n\n" + body)
 
     def upsert_github_index(self, item: Mapping[str, Any], rel_note_path: str) -> str:
         name = f"{item.get('owner', 'unknown')}/{item.get('repo', 'unknown')}"

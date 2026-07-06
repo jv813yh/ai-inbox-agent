@@ -64,6 +64,60 @@ class AgentWikiWriterTests(unittest.TestCase):
             writer.upsert_youtube_index(item, rel_path)
             index_text = (notes_dir / "Indexes" / "youtube-technologie-index.md").read_text(encoding="utf-8")
             self.assertEqual(index_text.count("Building Safe AI Agents"), 1)
+            channel_text = (notes_dir / "YouTube Channels" / "agent-lab.md").read_text(encoding="utf-8")
+            self.assertIn("video_count: 1", channel_text)
+            self.assertIn("[Building Safe AI Agents](../YouTube/Technologie/Agent Lab/", channel_text)
+            self.assertIn("Source: https://www.youtube.com/watch?v=abc123xyz00", channel_text)
+            self.assertIn("transcript: `true`", channel_text)
+            self.assertIn("Safe agents need boundaries.", channel_text)
+
+    def test_youtube_channel_index_shows_structured_video_summary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            notes_dir = Path(tmp)
+            writer = AgentWikiWriter(notes_dir)
+            item = {
+                "url": "https://www.youtube.com/watch?v=sum123xyz00",
+                "video_id": "sum123xyz00",
+                "title": "AI Code Review Patterns",
+                "channel": "Agent Lab",
+                "summary": """🎬 INTRO
+This video explains how to review AI-generated code safely.
+
+📝 WHAT IS THIS VIDEO ABOUT?
+It is about treating AI code as untrusted input and routing it through tests, lint, security scans, code review, and runtime verification.
+
+🔑 KEY TAKEAWAYS
+- AI-generated code needs the same review path as external pull requests.
+- Runtime checks catch bugs that static review misses.
+
+💼 ACTIONABLE IDEAS
+- Add a mandatory trust pipeline before merging AI code.
+- Keep verification evidence next to the change summary.
+""",
+                "has_full_transcript": True,
+                "processed_at": "2026-07-06T12:00:00+00:00",
+                "classification": {
+                    "domain": "Technologie",
+                    "topic": "AI Agents",
+                    "channel_name": "Agent Lab",
+                    "channel_slug": "agent-lab",
+                    "dataset_use": "rag",
+                    "source_type": "youtube",
+                    "method": "known_channel_map",
+                    "confidence": 0.95,
+                },
+            }
+            email_meta = {"from": "sender@example.com", "subject": "review", "date": "today", "message_id": "msg-channel-summary"}
+
+            rel_path = writer.write_youtube_note(item, email_meta=email_meta, gmail_account="learning")
+            writer.upsert_youtube_index(item, rel_path)
+            channel_text = (notes_dir / "YouTube Channels" / "agent-lab.md").read_text(encoding="utf-8")
+
+            self.assertIn("  - **Summary:** It is about treating AI code as untrusted input", channel_text)
+            self.assertIn("  - **Key points:**", channel_text)
+            self.assertIn("    - AI-generated code needs the same review path", channel_text)
+            self.assertIn("  - **Actionable ideas:**", channel_text)
+            self.assertIn("    - Add a mandatory trust pipeline", channel_text)
 
     def test_writes_youtube_note_populates_structured_sections_from_summary(self):
         with tempfile.TemporaryDirectory() as tmp:
