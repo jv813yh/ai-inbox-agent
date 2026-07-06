@@ -234,6 +234,47 @@ class YouTubeExtractor:
         return None
 
     @staticmethod
+    def _transcript_segments_to_text(segments) -> str:
+        """Normalize transcript segment objects/dicts from youtube-transcript-api v0/v1."""
+        parts = []
+        for item in segments or []:
+            if isinstance(item, dict):
+                text = item.get("text", "")
+            else:
+                text = getattr(item, "text", "")
+            text = str(text).strip()
+            if text:
+                parts.append(text)
+        return " ".join(parts).strip()
+
+    @staticmethod
+    def _get_transcript_via_youtube_transcript_api(video_id: str) -> Optional[str]:
+        """Extract transcript using youtube-transcript-api across v1.x and v0.x APIs."""
+        languages = ["en", "en-US", "en-GB", "a.en"]
+
+        try:
+            api = YouTubeTranscriptApi()
+            fetched = api.fetch(video_id, languages=languages)
+            text = YouTubeExtractor._transcript_segments_to_text(fetched)
+            if text:
+                print(f"  ✅ youtube-transcript-api transcript ({len(text)} chars)")
+                return YouTubeExtractor._sample_transcript(text)
+        except Exception as e:
+            print(f"  ⚠️ youtube-transcript-api v1 fetch failed: {e}")
+
+        legacy_get = getattr(YouTubeTranscriptApi, "get_transcript", None)
+        if legacy_get:
+            try:
+                transcript_list = legacy_get(video_id, languages=languages)
+                text = YouTubeExtractor._transcript_segments_to_text(transcript_list)
+                if text:
+                    print(f"  ✅ youtube-transcript-api v0 transcript ({len(text)} chars)")
+                    return YouTubeExtractor._sample_transcript(text)
+            except Exception as e:
+                print(f"  ⚠️ youtube-transcript-api v0 fallback failed: {e}")
+        return None
+
+    @staticmethod
     def get_transcript(url: str) -> Optional[str]:
         """Fetch transcript: Supadata API → yt-dlp subtitles → youtube-transcript-api → None."""
         print(f"  📝 Extracting transcript...")
@@ -273,26 +314,13 @@ class YouTubeExtractor:
         if text:
             return text
 
-        # 3. youtube-transcript-api (handles both v0.x and v1.x)
-        try:
-            api = YouTubeTranscriptApi()                          # v1.x
-            fetched = api.fetch(video_id)
-            text = " ".join(item.text for item in fetched)
-            print(f"  ✅ youtube-transcript-api transcript ({len(text)} chars)")
-            return YouTubeExtractor._sample_transcript(text)
-        except Exception:
-            pass
+        # 3. youtube-transcript-api (handles both v1.x instance fetch and v0.x static get_transcript)
+        text = YouTubeExtractor._get_transcript_via_youtube_transcript_api(video_id)
+        if text:
+            return text
 
-        try:
-            transcript_list = YouTubeTranscriptApi.get_transcript( # v0.x fallback
-                video_id, languages=["en", "en-US", "en-GB", "a.en"]
-            )
-            text = " ".join(item["text"] for item in transcript_list)
-            print(f"  ✅ youtube-transcript-api v0 transcript ({len(text)} chars)")
-            return YouTubeExtractor._sample_transcript(text)
-        except Exception as e:
-            print(f"  ⚠️ All transcript sources failed: {e}")
-            return None
+        print("  ⚠️ All transcript sources failed")
+        return None
     
     @staticmethod
     def summarize_video(url: str, title: str = "", description: str = "",
