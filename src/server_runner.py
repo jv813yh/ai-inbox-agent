@@ -50,6 +50,7 @@ _ARTICLE_SKIP_RE = re.compile(
 _TRACKING_QUERY_PREFIXES = ("utm_", "mc_")
 _TRACKING_QUERY_KEYS = {"fbclid", "gclid", "ref", "ref_src", "igshid"}
 MIN_PLAIN_EMAIL_CHARS = 150
+_NO_CHECK_SUBJECT_RE = re.compile(r"\bno\s*check\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -130,6 +131,15 @@ def _lazy_content_preparator():
     return ContentPreparator
 
 
+def subject_requests_no_check(subject: str) -> bool:
+    """Return True when an email subject explicitly asks to bypass source dedupe.
+
+    Jozef can resend a previously processed link with `no check` in the subject
+    to force reprocessing without deleting state rows.
+    """
+    return bool(_NO_CHECK_SUBJECT_RE.search(subject or ""))
+
+
 def process_messages(
     messages: list[GmailMessage],
     *,
@@ -155,7 +165,8 @@ def process_messages(
     ContentPreparator = None
 
     for msg in messages:
-        if store:
+        bypass_duplicate_check = subject_requests_no_check(msg.subject)
+        if store and not bypass_duplicate_check:
             existing_status = store.get_message_status(gmail_account, msg.id)
             if existing_status:
                 digest_lines.append(f"⏭️ Already handled email ({existing_status}): {msg.subject or msg.id}")
@@ -193,15 +204,20 @@ def process_messages(
 
         wrote_anything = False
 
-        youtube_urls = _dedupe_by(
-            (u for u in links.youtube if not store.is_source_processed("youtube", source_id_for_youtube_url(u))),
-            source_id_for_youtube_url,
-        )
-        github_urls = [u for u in links.github if not store.is_source_processed("github", source_id_for_github_url(u))]
-        article_urls = _dedupe_by(
-            (u for u in links.articles if not store.is_source_processed("article", source_id_for_article_url(u))),
-            source_id_for_article_url,
-        )
+        if bypass_duplicate_check:
+            youtube_urls = _dedupe_by(links.youtube, source_id_for_youtube_url)
+            github_urls = _dedupe_by(links.github, source_id_for_github_url)
+            article_urls = _dedupe_by(links.articles, source_id_for_article_url)
+        else:
+            youtube_urls = _dedupe_by(
+                (u for u in links.youtube if not store.is_source_processed("youtube", source_id_for_youtube_url(u))),
+                source_id_for_youtube_url,
+            )
+            github_urls = [u for u in links.github if not store.is_source_processed("github", source_id_for_github_url(u))]
+            article_urls = _dedupe_by(
+                (u for u in links.articles if not store.is_source_processed("article", source_id_for_article_url(u))),
+                source_id_for_article_url,
+            )
 
         if has_links and not youtube_urls and not github_urls and not article_urls:
             store.record_message(

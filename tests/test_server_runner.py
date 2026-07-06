@@ -684,6 +684,66 @@ This video explains how to build production AI agents by starting with one narro
         self.assertEqual(row[0], "skipped_duplicate")
         self.assertIn("skipped duplicate", digest.lower())
 
+    def test_process_messages_subject_no_check_reprocesses_duplicate_youtube_source(self):
+        class FakeContentPreparator:
+            seen_urls = []
+
+            @staticmethod
+            def prepare_youtube_batch(urls, email_body=""):
+                FakeContentPreparator.seen_urls = list(urls)
+                return [
+                    {
+                        "type": "youtube",
+                        "url": "https://youtu.be/abc123xyz00",
+                        "video_id": "abc123xyz00",
+                        "title": "Reprocessed video",
+                        "channel": "Test Channel",
+                        "summary": "Useful AI video summary.",
+                        "processed_at": "2026-07-06T10:00:00+00:00",
+                    }
+                ]
+
+            @staticmethod
+            def prepare_github_batch(urls):
+                return []
+
+            @staticmethod
+            def prepare_article_batch(urls, **kwargs):
+                return []
+
+        with tempfile.TemporaryDirectory() as tmp, patch("src.server_runner._lazy_content_preparator", return_value=FakeContentPreparator):
+            root = Path(tmp)
+            state_db = root / "state.sqlite"
+            store = StateStore(state_db)
+            store.record_source(
+                source_type="youtube",
+                source_id="abc123xyz00",
+                source_url="https://youtu.be/abc123xyz00",
+                note_path="Videos/existing.md",
+                first_seen_message_id="old-msg",
+            )
+            msg = GmailMessage(
+                id="no-check-msg",
+                thread_id="thread-1",
+                subject="no check — process this again",
+                from_addr="sender@example.com",
+                date="today",
+                body="https://youtu.be/abc123xyz00",
+            )
+
+            digest, successful_ids = process_messages([msg], notes_dir=root / "notes", state_db=state_db)
+            with store._connect() as conn:
+                row = conn.execute(
+                    "select status from processed_messages where gmail_account=? and gmail_message_id=?",
+                    ("learning", "no-check-msg"),
+                ).fetchone()
+
+        self.assertEqual(FakeContentPreparator.seen_urls, ["https://youtu.be/abc123xyz00"])
+        self.assertEqual(successful_ids, ["no-check-msg"])
+        self.assertEqual(row[0], "processed")
+        self.assertIn("Reprocessed video", digest)
+        self.assertNotIn("skipped duplicate", digest.lower())
+
 
 if __name__ == "__main__":
     unittest.main()
