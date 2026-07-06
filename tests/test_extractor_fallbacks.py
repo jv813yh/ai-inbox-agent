@@ -91,6 +91,35 @@ class ExtractorFallbackTests(unittest.TestCase):
         self.assertEqual(info["channel"], "Real Channel From Page")
         self.assertEqual(info["title"], "Watch Page Title")
 
+    def test_youtube_transcript_api_v1_fetch_uses_language_fallbacks(self):
+        class FakeFetchedItem:
+            def __init__(self, text):
+                self.text = text
+
+        class FakeTranscriptApi:
+            calls = []
+            def fetch(self, video_id, languages=("en",), preserve_formatting=False):
+                FakeTranscriptApi.calls.append((video_id, tuple(languages), preserve_formatting))
+                return [FakeFetchedItem("hello"), FakeFetchedItem("world")]
+
+        with patch.object(YouTubeExtractor, "_get_transcript_via_ytdlp", return_value=None), \
+             patch("extractors_full.YouTubeTranscriptApi", return_value=FakeTranscriptApi()):
+            transcript = YouTubeExtractor.get_transcript("https://youtu.be/abc123xyz00")
+
+        self.assertEqual(transcript, "hello world")
+        self.assertEqual(FakeTranscriptApi.calls, [("abc123xyz00", ("en", "en-US", "en-GB", "a.en"), False)])
+
+    def test_youtube_transcript_api_v1_fetch_handles_raw_dict_items(self):
+        class FakeTranscriptApi:
+            def fetch(self, video_id, languages=("en",), preserve_formatting=False):
+                return [{"text": "dict"}, {"text": "items"}]
+
+        with patch.object(YouTubeExtractor, "_get_transcript_via_ytdlp", return_value=None), \
+             patch("extractors_full.YouTubeTranscriptApi", return_value=FakeTranscriptApi()):
+            transcript = YouTubeExtractor.get_transcript("https://youtu.be/abc123xyz00")
+
+        self.assertEqual(transcript, "dict items")
+
     def test_prepare_youtube_batch_preserves_channel_metadata(self):
         with patch.object(YouTubeExtractor, "get_video_info", return_value={
             "url": "https://youtu.be/abc123xyz00",
