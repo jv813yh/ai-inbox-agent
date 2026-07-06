@@ -9,12 +9,14 @@ from src.server_runner import (
     DEFAULT_QUERY,
     build_arg_parser,
     build_outcome_report,
+    build_suggestions_report,
     classify_links,
     process_messages,
     source_id_for_article_url,
     source_id_for_github_url,
     source_id_for_youtube_url,
     write_daily_personal_ai_news_report,
+    write_suggestions_report,
 )
 from src.state_store import StateStore
 
@@ -27,6 +29,11 @@ class ServerRunnerRoutingTests(unittest.TestCase):
         args = build_arg_parser().parse_args(["--with-outcome"])
 
         self.assertTrue(args.with_outcome)
+
+    def test_parser_accepts_with_suggestions_flag(self):
+        args = build_arg_parser().parse_args(["--with-suggestions"])
+
+        self.assertTrue(args.with_suggestions)
 
     def test_classifies_youtube_and_github_links_from_email_body(self):
         body = """
@@ -120,6 +127,114 @@ This video explains how to build production AI agents by starting with one narro
         self.assertIn("Build Useful AI Agents", outcome)
         self.assertIn("Start with a narrow workflow", outcome)
         self.assertIn("Create a 50-case eval set", outcome)
+
+    def test_build_suggestions_report_creates_pending_review_actions_from_note(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            notes_dir = Path(tmp)
+            note = notes_dir / "YouTube" / "Technologie" / "Agent Lab" / "video.md"
+            note.parent.mkdir(parents=True)
+            note.write_text(
+                """---
+title: Build Useful AI Agents
+category: YouTube
+domain: Technologie
+topic: AI Agents
+channel: Agent Lab
+---
+
+# Build Useful AI Agents
+
+## Summary
+This video explains skills, evals, and approval loops for production AI agents.
+
+## Key points
+- Turn repeated agent workflows into reusable skills.
+- Add evals before increasing autonomy.
+
+## Actionable ideas
+- Create a skill template for agent review loops.
+- Implement an approval checklist before tools can write to production.
+""",
+                encoding="utf-8",
+            )
+            digest = "🎥 Build Useful AI Agents — Agent Lab → YouTube/Technologie/Agent Lab/video.md"
+
+            suggestions = build_suggestions_report(notes_dir, digest)
+
+        self.assertIn("## AI Implementation Suggestions", suggestions)
+        self.assertIn("pending_review", suggestions)
+        self.assertIn("Create a skill template", suggestions)
+        self.assertIn("Implement an approval checklist", suggestions)
+        self.assertIn("Do not execute automatically", suggestions)
+
+    def test_write_suggestions_report_persists_review_note(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            notes_dir = Path(tmp)
+            rel_path = write_suggestions_report(
+                notes_dir,
+                "## AI Implementation Suggestions\n\n- [ ] Create a skill template",
+                run_at=datetime(2026, 7, 6, 16, 5, tzinfo=timezone.utc),
+            )
+            report = notes_dir / rel_path
+            text = report.read_text(encoding="utf-8")
+
+        self.assertEqual(rel_path, "AI Suggestions/2026-07-06/1605/ai-inbox-agent-suggestions.md")
+        self.assertIn("type: ai_suggestions_review", text)
+        self.assertIn("status: pending_review", text)
+        self.assertIn("Create a skill template", text)
+
+    def test_main_with_suggestions_saves_suggestions_report_after_successful_index(self):
+        from src import server_runner
+
+        class FakeClient:
+            marked_read = []
+
+            def __init__(self, token_path):
+                self.token_path = token_path
+
+            def search_unread(self, query, *, max_results=5):
+                return [GmailMessage(id="msg-ok", thread_id="thread-1", subject="AI", from_addr="sender@example.com", date="today", body="body")]
+
+            def mark_read(self, ids):
+                self.marked_read.extend(ids)
+
+        def fake_process_messages(messages, **kwargs):
+            notes_dir = Path(kwargs["notes_dir"])
+            note = notes_dir / "YouTube" / "Technologie" / "Agent Lab" / "video.md"
+            note.parent.mkdir(parents=True)
+            note.write_text(
+                """---
+title: Build Useful AI Agents
+domain: Technologie
+topic: AI Agents
+channel: Agent Lab
+---
+
+# Build Useful AI Agents
+
+## Summary
+Skill and approval loop ideas.
+
+## Actionable ideas
+- Create a skill template for agent review loops.
+""",
+                encoding="utf-8",
+            )
+            return "🎥 Build Useful AI Agents — Agent Lab → YouTube/Technologie/Agent Lab/video.md", ["msg-ok"]
+
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(server_runner, "GmailApiClient", FakeClient), \
+             patch.object(server_runner, "process_messages", side_effect=fake_process_messages), \
+             patch.object(server_runner, "index_humanagentwiki", return_value=(True, "indexed")), \
+             patch("sys.argv", ["server_runner.py", "--with-suggestions", "--notes-dir", str(Path(tmp) / "notes"), "--humanagentwiki-dir", str(Path(tmp) / "haw")]):
+            self.assertEqual(server_runner.main(), 0)
+            reports = list((Path(tmp) / "notes" / "AI Suggestions").glob("*/*/ai-inbox-agent-suggestions.md"))
+            self.assertEqual(len(reports), 1)
+            text = reports[0].read_text(encoding="utf-8")
+
+        self.assertEqual(FakeClient.marked_read, ["msg-ok"])
+        self.assertIn("pending_review", text)
+        self.assertIn("Create a skill template", text)
 
     def test_main_saves_daily_personal_ai_news_report_after_successful_index(self):
         from src import server_runner

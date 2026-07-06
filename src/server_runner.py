@@ -480,6 +480,115 @@ def build_outcome_report(notes_dir: str | Path, digest: str) -> str:
     return "## Outcome\n\n" + "\n\n".join(sections)
 
 
+def _suggestion_lines_from_note(notes_dir: str | Path, rel_path: str) -> list[str]:
+    root = Path(notes_dir).expanduser().resolve()
+    path = (root / rel_path).resolve()
+    if root not in path.parents or not path.exists():
+        return [f"### {rel_path}", "**Status:** note_not_found", ""]
+    text = path.read_text(encoding="utf-8")
+    meta = _extract_frontmatter(text)
+    title = meta.get("title") or path.stem.replace("-", " ").title()
+    source = meta.get("channel") or meta.get("source_host") or meta.get("owner") or meta.get("category") or "HumanAgentWiki"
+    domain = meta.get("domain") or meta.get("topic") or meta.get("category") or ""
+    summary = _extract_markdown_section(text, "Summary")
+    key_points = _extract_markdown_section(text, "Key points") or _extract_markdown_section(text, "KEY TAKEAWAYS")
+    actions = _extract_markdown_section(text, "Actionable ideas") or _extract_markdown_section(text, "HOW TO APPLY THIS IN PRACTICE") or _extract_markdown_section(text, "My take")
+    action_lines = _first_nonempty_lines(actions, max_lines=6)
+    key_lines = _first_nonempty_lines(key_points or summary, max_lines=4)
+    if not action_lines and key_lines:
+        action_lines = [f"Turn this insight into a small reviewable experiment: {line.lstrip('- ').strip()}" for line in key_lines[:3]]
+
+    out = [
+        f"### {title}",
+        "**Status:** pending_review",
+        f"**Source:** {source}{(' · ' + domain) if domain else ''}",
+        f"**Source note:** `{rel_path}`",
+        "",
+        "**Suggested implementation / usage ideas:**",
+    ]
+    if action_lines:
+        for line in action_lines:
+            item = line.lstrip("- ").strip()
+            out.append(f"- [ ] {item}")
+    else:
+        out.append("- [ ] Review the source note and decide whether it should become a skill, checklist, or implementation task.")
+    out.extend([
+        "",
+        "**Approval options for Jozef:** approve / modify / reject",
+        "**Do not execute automatically:** these are proposals only until Jozef approves them.",
+        "",
+    ])
+    return out
+
+
+def build_suggestions_report(notes_dir: str | Path, digest: str) -> str:
+    """Build pending-review implementation suggestions from note paths in a digest."""
+    paths = [p for p in _note_paths_from_digest(digest) if not p.startswith("Daily Personal AI news/")]
+    if not paths:
+        return ""
+    lines = [
+        "## AI Implementation Suggestions",
+        "",
+        "**Status:** pending_review",
+        "**Purpose:** Convert the processed learning content into concrete ideas Jozef can approve, modify, or reject.",
+        "**Do not execute automatically:** no skills, code, or operational changes are created from this note without Jozef's approval.",
+        "",
+    ]
+    for rel in paths:
+        lines.extend(_suggestion_lines_from_note(notes_dir, rel))
+    return "\n".join(lines).strip()
+
+
+def write_suggestions_report(
+    notes_dir: str | Path,
+    suggestions: str,
+    *,
+    run_at: datetime | None = None,
+    title: str = "AI Inbox Agent Suggestions",
+) -> str:
+    """Persist AI implementation suggestions for human review in HumanAgentWiki."""
+    if not suggestions.strip():
+        return ""
+    timestamp = run_at or datetime.now().astimezone()
+    day = timestamp.strftime("%Y-%m-%d")
+    hour = timestamp.strftime("%H%M")
+    rel_path = Path("AI Suggestions") / day / hour / "ai-inbox-agent-suggestions.md"
+    root = Path(notes_dir).expanduser().resolve()
+    path = (root / rel_path).resolve()
+    if root not in path.parents:
+        raise ValueError(f"Refusing to write outside notes dir: {rel_path}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    content = f"""---
+title: {title} - {day} {hour}
+category: AI Suggestions
+type: ai_suggestions_review
+status: pending_review
+tags: [ai-suggestions, ai-inbox, implementation-ideas, pending-review]
+source_type: ai_inbox_agent
+dataset_use: rag
+date: {day}
+hour: {hour}
+processed_at: {timestamp.isoformat()}
+---
+
+# {title} - {day} {hour}
+
+{suggestions.strip()}
+
+## Review workflow
+
+- [ ] Jozef reviews these suggestions.
+- [ ] Jozef approves, modifies, or rejects each item.
+- [ ] Only approved items become skills, code changes, checklists, or HumanAgentWiki updates.
+
+## Related
+- [[Learning Gmail Inbox]]
+- [[AI Learning System Index]]
+"""
+    path.write_text(content, encoding="utf-8")
+    return rel_path.as_posix()
+
+
 def write_daily_personal_ai_news_report(
     notes_dir: str | Path,
     digest: str,
@@ -549,6 +658,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="After the digest, print a compact practical outcome summary from created HumanAgentWiki notes.",
     )
+    parser.add_argument(
+        "--with-suggestions",
+        action="store_true",
+        help="After the digest, print and save pending-review AI implementation suggestions from created HumanAgentWiki notes.",
+    )
     return parser
 
 
@@ -586,6 +700,17 @@ def main() -> int:
             if outcome:
                 print()
                 print(outcome)
+        if args.with_suggestions:
+            suggestions = build_suggestions_report(args.notes_dir, digest)
+            suggestions_rel_path = ""
+            if suggestions and not args.dry_run and index_ok:
+                suggestions_rel_path = write_suggestions_report(args.notes_dir, suggestions)
+                index_humanagentwiki(args.humanagentwiki_dir, args.notes_dir, dry_run=False)
+            if suggestions:
+                print()
+                print(suggestions)
+                if suggestions_rel_path:
+                    print(f"\n💡 Saved AI implementation suggestions → {suggestions_rel_path}")
         if args.dry_run:
             print("\nDRY RUN: no notes/state/email-read changes applied.")
     return 0
