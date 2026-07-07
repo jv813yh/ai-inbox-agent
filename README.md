@@ -1,30 +1,91 @@
 # AI Inbox Agent
 
-Turn a learning inbox into structured AI notes, implementation ideas, and Telegram digests.
+> Turn a learning inbox into structured AI notes, implementation ideas, and Telegram-ready digests.
 
-AI Inbox Agent reads learning emails, extracts links, summarizes useful content with Claude, writes durable Markdown notes, and keeps a local dedupe state so the same source is not processed repeatedly. It can run as a GitHub Actions bot or as a server-local pipeline that writes into a HumanAgentWiki/Obsidian-style notes folder.
+AI Inbox Agent watches a Gmail learning inbox, extracts useful links and long-form content, summarizes them with Claude, and writes durable Markdown notes for a knowledge base such as HumanAgentWiki or Obsidian.
 
-## Highlights
+It is built for people who send themselves YouTube videos, GitHub repos, newsletters, articles, and AI ideas — and want those inputs turned into searchable notes, practical takeaways, and reviewable implementation suggestions.
 
-- **Email → knowledge base:** process unread learning emails into Markdown notes.
-- **Multi-source extraction:** YouTube videos, GitHub repositories, web articles, newsletters, and long plain emails.
-- **RAG-friendly notes:** consistent frontmatter plus sections such as Summary, Key points, Entities, Claims, and Actionable ideas.
-- **HumanAgentWiki support:** writes source notes, index notes, daily digests, AI Learning System notes, and reviewable AI Suggestions notes.
-- **Telegram-ready output:** concise digests for chat delivery or cron/no-agent delivery.
-- **Safe dedupe:** YouTube by video ID, GitHub by `owner/repo`, articles by canonical URL, and messages by Gmail ID.
-- **Failure-safe Gmail handling:** messages are marked read only after note writing and HumanAgentWiki indexing succeed.
-- **Reprocess on demand:** put `no check` in the email subject to bypass source/message dedupe for that email.
-- **Outcome mode:** print compact practical takeaways from newly created notes.
-- **Suggestions mode:** save pending-review implementation suggestions that a human can approve, modify, or reject before anything is implemented.
-- **Prompt-injection aware:** prompts treat email bodies, transcripts, READMEs, and web content as untrusted data.
+---
 
-## Pipeline modes
+## What it does
+
+```text
+Unread Gmail
+   ↓
+Link + content detection
+   ↓
+YouTube / GitHub / Web article / Plain email extraction
+   ↓
+Claude summaries with prompt-injection safeguards
+   ↓
+Markdown notes + indexes + dedupe state
+   ↓
+Telegram digest / HumanAgentWiki / pending-review suggestions
+```
+
+## Why this is useful
+
+- **Capture once, reuse later** — forward links or notes to a learning inbox instead of losing them in chat/bookmarks.
+- **Structured knowledge base** — save consistent Markdown notes with frontmatter and reusable sections.
+- **Practical output** — get summaries, key points, claims, entities, and actionable ideas.
+- **Implementation thinking** — generate pending-review suggestions for skills, checklists, runbooks, or project improvements.
+- **Safe automation** — mark Gmail messages read only after notes and indexing succeed.
+
+---
+
+## Core features
+
+| Feature | What it means |
+|---|---|
+| **Gmail learning inbox** | Reads unread messages from a dedicated learning inbox. |
+| **YouTube processing** | Fetches metadata, tries transcript sources, summarizes videos, and creates channel hubs. |
+| **GitHub repo processing** | Fetches repo metadata/README and produces practical repo analysis. |
+| **Article/newsletter processing** | Extracts web article content and summarizes it into structured notes. |
+| **Plain email summaries** | Summarizes long emails even when no supported link is present. |
+| **HumanAgentWiki / Obsidian notes** | Writes Markdown notes, daily digests, indexes, and AI Learning System notes. |
+| **Outcome mode** | Prints compact practical takeaways from newly created notes. |
+| **Suggestions mode** | Saves pending-review implementation ideas for a human to approve/modify/reject. |
+| **Dedupe state** | Avoids reprocessing the same YouTube video, GitHub repo, article, or Gmail message. |
+| **`no check` bypass** | Put `no check` in the subject to intentionally reprocess a duplicate source. |
+| **Prompt-injection aware** | Treats email bodies, transcripts, web pages, and READMEs as untrusted input. |
+
+---
+
+## Example outputs
+
+### Telegram/stdout digest
+
+```text
+📬 AI Inbox Agent
+🎥 Building Reliable AI Agents — Example Channel → YouTube/Technologie/Example Channel/...
+🧠 Learning → AI Learning System/Technologie/...
+
+🗞️ Saved daily AI news digest → Daily Personal AI news/2026-07-06/1611/ai-inbox-agent.md
+```
+
+### Pending-review suggestions
+
+```md
+## AI Implementation Suggestions
+
+**Status:** pending_review
+**Do not execute automatically:** no skills, code, or operational changes are created without approval.
+
+- [ ] Create a reusable verification checklist for AI-generated code.
+- [ ] Turn this workflow into a project runbook.
+- [ ] Add a prompt template for evaluating new automation ideas.
+```
+
+---
+
+## Operating modes
+
+AI Inbox Agent supports two main modes.
 
 ### 1. GitHub Actions bot mode
 
-Good for a hosted daily email-summary/Telegram workflow.
-
-Main entry points:
+A hosted workflow for Gmail → Claude → Telegram summaries.
 
 | Script | Purpose |
 |---|---|
@@ -33,28 +94,28 @@ Main entry points:
 | `src/channel_watcher_bot.py` | Watch configured YouTube channels and summarize new videos. |
 | `src/youtube_queue_bot.py` | Process manually queued YouTube URLs from `config/youtube_queue.txt`. |
 
-GitHub workflows are manual by default (`workflow_dispatch`). Add a `schedule` block if you want cron execution.
+Workflows are manual by default via `workflow_dispatch`. Add a `schedule` trigger if you want cron execution.
 
 ### 2. Server-local HumanAgentWiki mode
 
-Good when you want durable notes on a server instead of only Telegram output.
+A local/server workflow for Gmail OAuth → Markdown notes → HumanAgentWiki indexing → Telegram-ready digest.
 
-Entry point:
+Main entry point:
 
 ```bash
 python src/server_runner.py --dry-run
 python src/server_runner.py
 ```
 
-Useful flags:
+Useful variants:
 
 ```bash
-python src/server_runner.py --dry-run --max-emails 3
 python src/server_runner.py --with-outcome
 python src/server_runner.py --with-suggestions
+python src/server_runner.py --dry-run --max-emails 3
 ```
 
-Typical server wrapper names used in production deployments:
+Machine-specific wrapper scripts are intentionally not committed. A deployment can provide wrappers such as:
 
 ```bash
 ai_inbox_learning_agent.sh
@@ -62,36 +123,42 @@ ai_inbox_learning_agent_with_outcome.sh
 ai_inbox_learning_agent_with_suggestions.sh
 ```
 
-These wrappers are intentionally not part of the repo because they usually contain machine-specific paths.
+---
 
-## What gets written in HumanAgentWiki mode
+## What gets written
 
-| Output | Example path |
+In HumanAgentWiki/Obsidian mode, the runner writes Markdown files like these:
+
+| Output type | Example path |
 |---|---|
-| YouTube notes | `YouTube/Technologie/<channel>/YYYY-MM-DD--<video-id>--<slug>.md` |
-| GitHub notes | `GitHub Projects/<owner>--<repo>.md` |
-| Web article notes | `Web Articles/<classification>/<domain>/<slug>.md` |
-| Plain email notes | `Emails/<classification>/<YYYY-MM>/<slug>.md` |
-| AI Learning notes | `AI Learning System/<domain>/<slug>.md` |
-| YouTube channel hubs | `YouTube Channels/<channel>.md` |
-| Index notes | `Indexes/*.md` |
+| YouTube source note | `YouTube/Technologie/<channel>/YYYY-MM-DD--<video-id>--<slug>.md` |
+| YouTube channel hub | `YouTube Channels/<channel>.md` |
+| GitHub repo note | `GitHub Projects/<owner>--<repo>.md` |
+| Web article note | `Web Articles/<classification>/<domain>/<slug>.md` |
+| Plain email note | `Emails/<classification>/<YYYY-MM>/<slug>.md` |
+| AI Learning note | `AI Learning System/<domain>/<slug>.md` |
 | Daily digest | `Daily Personal AI news/YYYY-MM-DD/HHMM/ai-inbox-agent.md` |
-| Pending-review suggestions | `AI Suggestions/YYYY-MM-DD/HHMM/ai-inbox-agent-suggestions.md` |
+| Suggestions review note | `AI Suggestions/YYYY-MM-DD/HHMM/ai-inbox-agent-suggestions.md` |
+| Indexes | `Indexes/*.md` |
+
+---
 
 ## Content handling
 
 | Input | Behavior |
 |---|---|
-| YouTube URL | Fetch metadata, try transcript sources, summarize with Claude, write source note and channel hub. |
-| GitHub repo URL | Fetch repo metadata/README, summarize purpose, architecture, and adoption ideas. |
-| Web article URL | Fetch readable page content and summarize into a structured article note. |
-| Long plain email | Summarize directly when it is likely useful learning content. |
+| YouTube URL | Fetch metadata, try transcripts, summarize with Claude, write a source note and channel hub. |
+| GitHub repo URL | Fetch repository metadata and README, then summarize purpose, architecture, risks, and usage ideas. |
+| Web article URL | Fetch readable page content and summarize it into a structured article note. |
+| Long plain email | Summarize directly when it looks like useful learning material. |
 | Duplicate source | Skip by default and record state. |
-| Subject contains `no check` | Reprocess even if the source/message was seen before. |
+| Subject contains `no check` | Reprocess the source even if it was already seen. |
 
-YouTube transcript extraction tries multiple sources. Cloud/server IPs may still be blocked by YouTube; when transcript retrieval fails, the pipeline can fall back to email body/context so the workflow still produces a useful note.
+YouTube transcript extraction can be blocked on cloud/server IPs. When that happens, the pipeline can still use email context and metadata so the run produces a useful note instead of failing completely.
 
-## Outcome and suggestions modes
+---
+
+## Outcome vs suggestions
 
 ### Outcome mode
 
@@ -99,7 +166,9 @@ YouTube transcript extraction tries multiple sources. Cloud/server IPs may still
 python src/server_runner.py --with-outcome
 ```
 
-After processing, prints compact practical takeaways from the notes created in that run.
+Prints practical takeaways from notes created in the current run.
+
+Use it when you want an immediate “what can I do with this?” summary.
 
 ### Suggestions mode
 
@@ -107,42 +176,20 @@ After processing, prints compact practical takeaways from the notes created in t
 python src/server_runner.py --with-suggestions
 ```
 
-After processing, creates a pending-review note with possible implementation ideas, for example:
+Creates a `pending_review` note with possible implementation ideas, such as:
 
-- create a reusable skill/checklist,
-- add a verification workflow,
-- turn a video process into a runbook,
-- add a project template,
-- investigate a tool mentioned in the source.
+- create a reusable skill,
+- add a checklist,
+- write a runbook,
+- build a project template,
+- investigate a tool or technique,
+- improve an existing automation.
 
-Suggestions are **not executed automatically**. They are proposals for a human to approve, modify, or reject.
+Suggestions are **not executed automatically**. They are intentionally saved for human approval first.
 
-## Configuration
+---
 
-### Environment variables
-
-| Variable | Used by | Notes |
-|---|---|---|
-| `CLAUDE_API_KEY` or `ANTHROPIC_API_KEY` | Claude summaries | Required for LLM summaries. |
-| `CLAUDE_API_KEY_GITHUB_EMAIL` | Legacy workflows | Kept for older workflow compatibility. |
-| `GMAIL_CREDENTIALS` | IMAP/GitHub Actions bot mode | JSON with email/app password for the legacy IMAP bot. Prefer OAuth for server mode. |
-| `TELEGRAM_BOT_TOKEN` | Telegram delivery | Required for bot-mode Telegram output. |
-| `TELEGRAM_CHAT_ID` | Telegram delivery | Destination chat. |
-| `SUPADATA_API_KEY` | Optional transcript/content provider | Optional fallback/enrichment provider. |
-| `GOOGLE_TOKEN_PATH` | Server-local Gmail OAuth mode | Path to an OAuth token JSON file. |
-
-Do not commit `.env`, OAuth token files, app passwords, API keys, SQLite state, generated notes, or local virtual environments.
-
-### Config files
-
-| File | Purpose |
-|---|---|
-| `config/watched_channels.yaml` | YouTube channel IDs for the channel watcher. |
-| `config/youtube_queue.txt` | Manual queue for YouTube URLs. |
-| `config/prompts.yaml` | Optional prompt/config experiments. |
-| `src/prompts.py` | Versioned prompt constants used by the prompt builder. |
-
-## Install
+## Installation
 
 ```bash
 git clone https://github.com/<owner>/ai-inbox-agent.git
@@ -152,29 +199,60 @@ python3 -m venv .venv
 pip install -r requirements.txt
 ```
 
-## Run locally
-
-Dry-run the server-local runner:
-
-```bash
-python src/server_runner.py --dry-run
-```
-
 Run tests:
 
 ```bash
 python -m pytest -q
 ```
 
-Syntax checks:
+Run syntax checks:
 
 ```bash
 python -m py_compile src/*.py
 ```
 
-## Public-repo safety checklist
+---
 
-Before making a fork/repo public, check:
+## Configuration
+
+### Environment variables
+
+| Variable | Used by | Notes |
+|---|---|---|
+| `CLAUDE_API_KEY` or `ANTHROPIC_API_KEY` | Claude summaries | Required for LLM summarization. |
+| `CLAUDE_API_KEY_GITHUB_EMAIL` | Legacy workflows | Kept for older GitHub Actions compatibility. |
+| `GMAIL_CREDENTIALS` | GitHub Actions IMAP mode | JSON containing email/app-password fields. Prefer OAuth for server mode. |
+| `GOOGLE_TOKEN_PATH` | Server-local OAuth mode | Path to a Google OAuth token JSON file. |
+| `TELEGRAM_BOT_TOKEN` | Telegram delivery | Telegram bot token. |
+| `TELEGRAM_CHAT_ID` | Telegram delivery | Destination chat. |
+| `SUPADATA_API_KEY` | Optional transcript/content enrichment | Optional fallback provider. |
+
+### Config files
+
+| File | Purpose |
+|---|---|
+| `config/watched_channels.yaml` | YouTube channels for the channel watcher. |
+| `config/youtube_queue.txt` | Manual queue for YouTube URLs. |
+| `config/prompts.yaml` | Optional prompt/config experiments. |
+| `src/prompts.py` | Versioned prompt constants used by the prompt builder. |
+
+---
+
+## Safety model
+
+AI Inbox Agent is designed around a few important safety rules:
+
+- **Untrusted input:** email bodies, transcripts, READMEs, and web pages are data, not instructions.
+- **No secret exposure:** prompts and logs must not include API keys, OAuth tokens, app passwords, or local state DB content.
+- **Safe Gmail marking:** messages are marked read only after downstream persistence succeeds.
+- **Idempotent processing:** dedupe state prevents accidental repeated processing.
+- **Human approval:** suggestions remain `pending_review` until a human approves them.
+
+---
+
+## Public-repo checklist
+
+Before publishing a fork or deployment repo, run:
 
 ```bash
 git status --short
@@ -183,17 +261,34 @@ git grep -nE 'sk-|AIza|ya29\.|refresh_token|client_secret|TELEGRAM_BOT_TOKEN|GMA
 python -m pytest -q
 ```
 
-Expected: no real secrets, no local virtualenv, no state DB, no generated private notes.
+Expected:
 
-## Design principles
+- no real secrets,
+- no local virtualenv,
+- no OAuth token files,
+- no SQLite state DB,
+- no generated private notes.
 
-- Treat email, transcripts, READMEs, and web pages as untrusted input.
-- Never follow instructions embedded in source content.
-- Do not expose secrets in prompts, logs, notes, or Telegram messages.
-- Prefer deterministic classification and dedupe before LLM judgment.
-- Mark Gmail messages read only after downstream note/index persistence succeeds.
-- Keep generated suggestions in `pending_review` until a human approves them.
+---
 
-## Repository notes
+## Project status
 
-This project started as a personal learning-inbox automation and still contains both hosted GitHub Actions scripts and server-local HumanAgentWiki integration. For a clean public deployment, provide your own secrets via GitHub Actions secrets or local environment variables, and adapt server paths with CLI flags such as `--notes-dir`, `--state-db`, and `--token-path`.
+This project started as a personal learning-inbox automation and now contains both:
+
+1. a reusable GitHub Actions Gmail/Telegram bot, and
+2. a server-local HumanAgentWiki knowledge pipeline.
+
+For public use, bring your own secrets and adapt paths with CLI flags such as:
+
+```bash
+python src/server_runner.py \
+  --token-path /path/to/google_token.json \
+  --notes-dir /path/to/notes \
+  --state-db /path/to/processed.sqlite
+```
+
+---
+
+## License
+
+No license file is currently included. Add one before encouraging external contributions or reuse.
