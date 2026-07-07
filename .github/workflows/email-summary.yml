@@ -1,27 +1,25 @@
 name: Email AI Summary
 
-on:
-  schedule:
-
-  workflow_dispatch:      # Manuálne spustenie
+'on':
+  workflow_dispatch:
 
 jobs:
   email-summary:
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-      
+
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
           pip install youtube-transcript-api yt-dlp python-telegram-bot google-auth-httplib2 google-api-python-client pyyaml
-      
+
       - name: Run Email Summary Bot
         env:
           GMAIL_CREDENTIALS: ${{ secrets.GMAIL_CREDENTIALS }}
@@ -33,7 +31,7 @@ jobs:
           TZ: Europe/Bratislava
         working-directory: src
         run: python email_summary_bot_final.py
-        
+
       - name: Upload prepared content
         if: always()
         uses: actions/upload-artifact@v4

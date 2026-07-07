@@ -1,216 +1,199 @@
-# ai-inbox-agent — Email AI Summary Bot
+# AI Inbox Agent
 
-Runs daily via GitHub Actions. Reads unread Gmail, auto-detects content type from the email body, summarizes with Claude, sends results to Telegram, and saves `prepared_content.json` as a CI artifact.
+Turn a learning inbox into structured AI notes, implementation ideas, and Telegram digests.
 
----
+AI Inbox Agent reads learning emails, extracts links, summarizes useful content with Claude, writes durable Markdown notes, and keeps a local dedupe state so the same source is not processed repeatedly. It can run as a GitHub Actions bot or as a server-local pipeline that writes into a HumanAgentWiki/Obsidian-style notes folder.
 
-## How It Works
+## Highlights
 
-Every unread email is processed. Content type is detected automatically from the body — no special subject required:
+- **Email → knowledge base:** process unread learning emails into Markdown notes.
+- **Multi-source extraction:** YouTube videos, GitHub repositories, web articles, newsletters, and long plain emails.
+- **RAG-friendly notes:** consistent frontmatter plus sections such as Summary, Key points, Entities, Claims, and Actionable ideas.
+- **HumanAgentWiki support:** writes source notes, index notes, daily digests, AI Learning System notes, and reviewable AI Suggestions notes.
+- **Telegram-ready output:** concise digests for chat delivery or cron/no-agent delivery.
+- **Safe dedupe:** YouTube by video ID, GitHub by `owner/repo`, articles by canonical URL, and messages by Gmail ID.
+- **Failure-safe Gmail handling:** messages are marked read only after note writing and HumanAgentWiki indexing succeed.
+- **Reprocess on demand:** put `no check` in the email subject to bypass source/message dedupe for that email.
+- **Outcome mode:** print compact practical takeaways from newly created notes.
+- **Suggestions mode:** save pending-review implementation suggestions that a human can approve, modify, or reject before anything is implemented.
+- **Prompt-injection aware:** prompts treat email bodies, transcripts, READMEs, and web content as untrusted data.
 
-| Body contains | Logic |
+## Pipeline modes
+
+### 1. GitHub Actions bot mode
+
+Good for a hosted daily email-summary/Telegram workflow.
+
+Main entry points:
+
+| Script | Purpose |
 |---|---|
-| YouTube link | Fetch metadata (yt-dlp) + transcript (youtube-transcript-api) + Claude Opus detailed notes |
-| GitHub link | Fetch repo info + README via GitHub API + Claude Opus detailed analysis |
-| Neither | Claude Haiku summarizes the email in 3-5 bullet points |
+| `src/email_summary_bot_final.py` | Read unread Gmail via IMAP/app password, summarize links/plain emails, send Telegram output. |
+| `src/collector_bot.py` | Collect AI/news links from configured sources and email them into the inbox. |
+| `src/channel_watcher_bot.py` | Watch configured YouTube channels and summarize new videos. |
+| `src/youtube_queue_bot.py` | Process manually queued YouTube URLs from `config/youtube_queue.txt`. |
 
-The `EmailFilter` class still applies Gmail labels/stars based on subject keywords, but does **not** gate content extraction.
+GitHub workflows are manual by default (`workflow_dispatch`). Add a `schedule` block if you want cron execution.
 
----
+### 2. Server-local HumanAgentWiki mode
 
-## File Structure
+Good when you want durable notes on a server instead of only Telegram output.
 
-```
-src/
-  email_summary_bot_final.py   Main bot — Gmail IMAP, email loop, Telegram sending
-  extractors_full.py           YouTubeExtractor, GitHubExtractor, ContentPreparator
-  prompt_builder.py            Applies active prompt templates from prompts.py
-  prompts.py                   All prompt strings — versioned + latest_* pointers
-.github/workflows/
-  email-summary.yml            CI workflow (cron + manual trigger)
-```
-
----
-
-## Prompt System
-
-All prompts live in `prompts.py` as versioned constants:
-
-```python
-YOUTUBE_V1    = "..."
-GITHUB_V1     = "..."
-PLAIN_EMAIL_V1 = "..."
-
-# Change these single lines to swap prompts everywhere
-latest_youtube     = YOUTUBE_V1
-latest_github      = GITHUB_V1
-latest_plain_email = PLAIN_EMAIL_V1
-```
-
-`prompt_builder.py` reads only `latest_*` and handles data prep (truncation, context building) + `str.format()`. To add a new content type: add a constant in `prompts.py` + a method in `prompt_builder.py`.
-
----
-
-## GitHub Actions Workflow
-
-**Trigger:** Daily at 20:00 UTC / `workflow_dispatch` for manual runs.
-
-**Required secrets:**
-
-| Secret | Used as env var |
-|---|---|
-| `GMAIL_CREDENTIALS` | `GMAIL_CREDENTIALS` |
-| `TELEGRAM_BOT_TOKEN` | `TELEGRAM_BOT_TOKEN` |
-| `TELEGRAM_CHAT_ID` | `TELEGRAM_CHAT_ID` |
-| `CLAUDE_API_KEY_GITHUB_EMAIL` | `CLAUDE_API_KEY` + `CLAUDE_API_KEY_GITHUB_EMAIL` |
-| `SUPADATA_API_KEY` | `SUPADATA_API_KEY` |
-
-**Timezone:** `TZ: Europe/Bratislava` set in workflow env.
-
-**Artifact:** `src/prepared_content.json` uploaded after each run, retained 30 days.
-
----
-
-## prepared_content.json Structure
-
-```json
-{
-  "youtube": [
-    {
-      "type": "youtube_video",
-      "url": "...",
-      "title": "...",
-      "detailed_notes": "...",
-      "has_full_transcript": true,
-      "transcript_preview": "...",
-      "processed_at": "..."
-    }
-  ],
-  "github": [
-    {
-      "type": "github_repo",
-      "url": "...",
-      "owner": "...",
-      "repo": "...",
-      "stars": 0,
-      "forks": 0,
-      "language": "...",
-      "detailed_summary": "...",
-      "processed_at": "..."
-    }
-  ],
-  "plain_emails": [
-    {
-      "subject": "...",
-      "from": "...",
-      "date": "...",
-      "summary": "..."
-    }
-  ],
-  "emails_processed": 2,
-  "timestamp": "2026-04-16T20:00:00"
-}
-```
-
----
-
-## Server-local Hermes + AgentWiki mode
-
-Use this mode when the bot should read Jozef's `learning` Gmail account on the server and write durable notes into HumanAgentWiki/Obsidian.
-
-**Why local:** GitHub Actions cannot write to `/home/jozef/humanagentwiki/notes`, so AgentWiki persistence runs on the server via Hermes cron.
-
-### Entry point
+Entry point:
 
 ```bash
-python3 src/server_runner.py --dry-run --max-emails 3
+python src/server_runner.py --dry-run
+python src/server_runner.py
 ```
 
-Real run:
+Useful flags:
 
 ```bash
-python3 src/server_runner.py --max-emails 5
+python src/server_runner.py --dry-run --max-emails 3
+python src/server_runner.py --with-outcome
+python src/server_runner.py --with-suggestions
 ```
 
-### Defaults
+Typical server wrapper names used in production deployments:
 
-| Setting | Default |
+```bash
+ai_inbox_learning_agent.sh
+ai_inbox_learning_agent_with_outcome.sh
+ai_inbox_learning_agent_with_suggestions.sh
+```
+
+These wrappers are intentionally not part of the repo because they usually contain machine-specific paths.
+
+## What gets written in HumanAgentWiki mode
+
+| Output | Example path |
 |---|---|
-| Gmail account | `learning` |
-| OAuth token | `/home/jozef/.hermes/google_accounts/learning/google_token.json` |
-| Gmail query | `in:inbox is:unread newer_than:30d (youtube OR youtu.be OR github.com OR subject:YouTube OR subject:GitHub)` |
-| HumanAgentWiki notes | `/home/jozef/humanagentwiki/notes` |
-| State DB | `/home/jozef/.hermes/state/ai-inbox-agent/processed.sqlite` |
+| YouTube notes | `YouTube/Technologie/<channel>/YYYY-MM-DD--<video-id>--<slug>.md` |
+| GitHub notes | `GitHub Projects/<owner>--<repo>.md` |
+| Web article notes | `Web Articles/<classification>/<domain>/<slug>.md` |
+| Plain email notes | `Emails/<classification>/<YYYY-MM>/<slug>.md` |
+| AI Learning notes | `AI Learning System/<domain>/<slug>.md` |
+| YouTube channel hubs | `YouTube Channels/<channel>.md` |
+| Index notes | `Indexes/*.md` |
+| Daily digest | `Daily Personal AI news/YYYY-MM-DD/HHMM/ai-inbox-agent.md` |
+| Pending-review suggestions | `AI Suggestions/YYYY-MM-DD/HHMM/ai-inbox-agent-suggestions.md` |
 
-### Behavior
+## Content handling
 
-- Reads all unread messages from the dedicated learning Gmail inbox (`in:inbox is:unread newer_than:30d`).
-- Processes emails containing one link or a list of links: YouTube, GitHub, generic web pages/articles, blogs, newsletters, Substack, Medium, arXiv, and similar URLs.
-- Long plain emails without supported links are summarized by default for the learning Gmail account; short/no-link emails are recorded as `skipped_unclassified` so they do not loop forever.
-- Classifies notes into logical wiki folders (`Technologie`, `Investovanie`, `Produktivita`, `Biznis`, `Ostatne`) using deterministic host/keyword rules before falling back to `Ostatne`.
-- Writes GitHub Markdown notes into:
-  - `GitHub Projects/`
-- Writes web article Markdown notes into:
-  - `Web Articles/<classification>/<domain>/`
-- Writes plain email Markdown notes into:
-  - `Emails/<classification>/<YYYY-MM>/`
-- Writes YouTube Markdown notes into topic/channel folders for later RAG/fine-tuning use:
-  - `YouTube/Investovanie/<channel>/`
-  - `YouTube/Technologie/<channel>/`
-  - `YouTube/Ostatne/<channel>/`
-- Adds RAG-friendly frontmatter metadata such as `domain`, `topic`, `channel_slug`, `dataset_use`, and `source_type`.
-- Maintains per-domain YouTube index notes such as `Indexes/youtube-investovanie-index.md` and `Indexes/youtube-technologie-index.md`.
-- Maintains article and email indexes:
-  - `Indexes/web-article-index.md`
-  - `Indexes/plain-email-index.md`
-- Saves the Telegram/stdout digest into HumanAgentWiki for later retrieval:
-  - `Daily Personal AI news/<YYYY-MM-DD>/<HHMM>/ai-inbox-agent.md`
-- Maintains a local SQLite dedupe store so repeated links are not processed again. YouTube dedupes by `video_id`, GitHub by `owner/repo`, and web articles by canonical URL with tracking params stripped.
-- Runs the HumanAgentWiki indexer after successful note writes.
-- Marks email as read only after successful processing.
-- Prints a Telegram-ready digest to stdout for Hermes cron delivery.
+| Input | Behavior |
+|---|---|
+| YouTube URL | Fetch metadata, try transcript sources, summarize with Claude, write source note and channel hub. |
+| GitHub repo URL | Fetch repo metadata/README, summarize purpose, architecture, and adoption ideas. |
+| Web article URL | Fetch readable page content and summarize into a structured article note. |
+| Long plain email | Summarize directly when it is likely useful learning content. |
+| Duplicate source | Skip by default and record state. |
+| Subject contains `no check` | Reprocess even if the source/message was seen before. |
 
-### Hermes cron wrapper
+YouTube transcript extraction tries multiple sources. Cloud/server IPs may still be blocked by YouTube; when transcript retrieval fails, the pipeline can fall back to email body/context so the workflow still produces a useful note.
 
-Server wrapper:
+## Outcome and suggestions modes
+
+### Outcome mode
 
 ```bash
-/home/jozef/.hermes/scripts/ai_inbox_learning_agent.sh
+python src/server_runner.py --with-outcome
 ```
 
-Recommended cron schedule after manual dry-run validation:
+After processing, prints compact practical takeaways from the notes created in that run.
 
-```text
-every 2h
+### Suggestions mode
+
+```bash
+python src/server_runner.py --with-suggestions
 ```
 
-Do not create/push/merge GitHub changes or create cron jobs without Jozef confirmation.
+After processing, creates a pending-review note with possible implementation ideas, for example:
 
----
+- create a reusable skill/checklist,
+- add a verification workflow,
+- turn a video process into a runbook,
+- add a project template,
+- investigate a tool mentioned in the source.
 
-## Known Issues & Notes
+Suggestions are **not executed automatically**. They are proposals for a human to approve, modify, or reject.
 
-- **YouTube on CI:** yt-dlp is blocked by YouTube bot detection on GitHub Actions IPs. Transcripts use `youtube-transcript-api` instead. If a video has no captions, Claude summarizes using title + description only.
-- **GitHub API rate limit:** Unauthenticated requests are limited to 60/hr. Add a `GITHUB_TOKEN` header in `get_repo_info()` if hitting limits.
-- **Telegram message length:** Messages are split into 4096-char chunks automatically. All AI-generated content is HTML-escaped to prevent parse errors (`parse_mode: HTML`).
-- **Email read status:** Emails are fetched with `BODY.PEEK[]` so they are **not** marked as read during processing.
+## Configuration
 
----
+### Environment variables
 
-## Fixes Applied (session history)
-
-| # | Issue | Fix |
+| Variable | Used by | Notes |
 |---|---|---|
-| 1 | Wrong script name in workflow | `email_summary_bot_apppassword.py` → `email_summary_bot_final.py` |
-| 2 | Artifact path wrong | `prepared_content.json` → `src/prepared_content.json` |
-| 3 | `upload-artifact` v3 deprecated | Upgraded to v4 |
-| 4 | Wrong `sys.path` in bot | `os.path.dirname(__file__) + '..'` → `os.path.dirname(os.path.abspath(__file__))` |
-| 5 | Wrong import name | `from extractors import` → `from extractors_full import` |
-| 6 | API key not found in runner | Workflow now exposes both `CLAUDE_API_KEY` and `CLAUDE_API_KEY_GITHUB_EMAIL` |
-| 7 | Timestamps 2h behind | Added `TZ: Europe/Bratislava` to workflow env |
-| 8 | Telegram Markdown crash | Switched to `parse_mode: HTML` + HTML-escape all AI content |
-| 9 | Emails marked as read on fetch | Changed IMAP fetch from `RFC822` → `BODY.PEEK[]` |
-| 10 | yt-dlp blocked on CI | Transcripts now use `youtube-transcript-api`; `get_video_info` falls back to stub |
-| 11 | Plain emails not processed | Added Claude Haiku summarization for emails with no YT/GitHub links |
-| 12 | Prompts scattered in code | Extracted to `prompts.py` (versioned) + `prompt_builder.py` |
-| 13 | YouTube: Claude got no context when yt-dlp blocked + no transcript | `prepare_youtube_batch` now accepts `email_body`; used as description fallback so Claude can summarize from the email content itself |
+| `CLAUDE_API_KEY` or `ANTHROPIC_API_KEY` | Claude summaries | Required for LLM summaries. |
+| `CLAUDE_API_KEY_GITHUB_EMAIL` | Legacy workflows | Kept for older workflow compatibility. |
+| `GMAIL_CREDENTIALS` | IMAP/GitHub Actions bot mode | JSON with email/app password for the legacy IMAP bot. Prefer OAuth for server mode. |
+| `TELEGRAM_BOT_TOKEN` | Telegram delivery | Required for bot-mode Telegram output. |
+| `TELEGRAM_CHAT_ID` | Telegram delivery | Destination chat. |
+| `SUPADATA_API_KEY` | Optional transcript/content provider | Optional fallback/enrichment provider. |
+| `GOOGLE_TOKEN_PATH` | Server-local Gmail OAuth mode | Path to an OAuth token JSON file. |
+
+Do not commit `.env`, OAuth token files, app passwords, API keys, SQLite state, generated notes, or local virtual environments.
+
+### Config files
+
+| File | Purpose |
+|---|---|
+| `config/watched_channels.yaml` | YouTube channel IDs for the channel watcher. |
+| `config/youtube_queue.txt` | Manual queue for YouTube URLs. |
+| `config/prompts.yaml` | Optional prompt/config experiments. |
+| `src/prompts.py` | Versioned prompt constants used by the prompt builder. |
+
+## Install
+
+```bash
+git clone https://github.com/<owner>/ai-inbox-agent.git
+cd ai-inbox-agent
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+```
+
+## Run locally
+
+Dry-run the server-local runner:
+
+```bash
+python src/server_runner.py --dry-run
+```
+
+Run tests:
+
+```bash
+python -m pytest -q
+```
+
+Syntax checks:
+
+```bash
+python -m py_compile src/*.py
+```
+
+## Public-repo safety checklist
+
+Before making a fork/repo public, check:
+
+```bash
+git status --short
+git ls-files 'venv/*' '.venv/*' '*.sqlite' '*.db' '*.env' '*token*' '*secret*'
+git grep -nE 'sk-|AIza|ya29\.|refresh_token|client_secret|TELEGRAM_BOT_TOKEN|GMAIL_CREDENTIALS|app_password|password'
+python -m pytest -q
+```
+
+Expected: no real secrets, no local virtualenv, no state DB, no generated private notes.
+
+## Design principles
+
+- Treat email, transcripts, READMEs, and web pages as untrusted input.
+- Never follow instructions embedded in source content.
+- Do not expose secrets in prompts, logs, notes, or Telegram messages.
+- Prefer deterministic classification and dedupe before LLM judgment.
+- Mark Gmail messages read only after downstream note/index persistence succeeds.
+- Keep generated suggestions in `pending_review` until a human approves them.
+
+## Repository notes
+
+This project started as a personal learning-inbox automation and still contains both hosted GitHub Actions scripts and server-local HumanAgentWiki integration. For a clean public deployment, provide your own secrets via GitHub Actions secrets or local environment variables, and adapt server paths with CLI flags such as `--notes-dir`, `--state-db`, and `--token-path`.

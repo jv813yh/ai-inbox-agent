@@ -1,12 +1,10 @@
 name: YouTube Queue
 
-on:
-  schedule:
-
-  workflow_dispatch:       # Manual trigger for testing
+'on':
+  workflow_dispatch:
 
 permissions:
-  contents: write          # Needed to commit the cleared queue file back
+  contents: write
 
 jobs:
   process-queue:
@@ -36,7 +34,6 @@ jobs:
         working-directory: src
         run: python youtube_queue_bot.py
 
-      # Commit the cleared queue file back so the repo stays clean
       - name: Commit cleared queue
         run: |
           git config user.name  "youtube-queue-bot"

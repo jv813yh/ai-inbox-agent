@@ -1,9 +1,7 @@
 name: AI Content Collector
 
-on:
-  schedule:
-  
-  workflow_dispatch:        # Manual trigger for testing
+'on':
+  workflow_dispatch:
 
 jobs:
   collect:
