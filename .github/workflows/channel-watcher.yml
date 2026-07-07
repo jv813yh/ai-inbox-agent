@@ -1,9 +1,7 @@
 name: Channel Watcher
 
-on:
-  schedule:
-
-  workflow_dispatch:        # Manual trigger for testing
+'on':
+  workflow_dispatch:
 
 jobs:
   watch:
@@ -22,14 +20,12 @@ jobs:
           pip install -r requirements.txt
           pip install youtube-transcript-api yt-dlp pyyaml
 
-      # Download the state file from the previous run so we know which
-      # videos were already processed.
       - name: Download channel state
         uses: actions/download-artifact@v4
         with:
           name: channel-state
           path: src/
-        continue-on-error: true   # First run — artifact doesn't exist yet
+        continue-on-error: true
 
       - name: Run Channel Watcher Bot
         env:
@@ -42,7 +38,6 @@ jobs:
         working-directory: src
         run: python channel_watcher_bot.py
 
-      # Upload the updated state so the next run picks it up.
       - name: Upload channel state
         if: always()
         uses: actions/upload-artifact@v4
