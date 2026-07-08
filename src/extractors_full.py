@@ -41,6 +41,8 @@ def _split_take(text: str) -> tuple[str, str]:
 
 class YouTubeExtractor:
     """Extract YouTube video info, transcripts and summarize"""
+
+    TRANSCRIPT_LANGUAGE_FALLBACKS = ["en", "en-US", "en-GB", "a.en", "cs", "a.cs", "sk", "a.sk"]
     
     @staticmethod
     def extract_youtube_links(text: str) -> List[str]:
@@ -209,7 +211,7 @@ class YouTubeExtractor:
                 info = ydl.extract_info(url, download=False)
 
             for sub_dict in [info.get('subtitles', {}), info.get('automatic_captions', {})]:
-                for lang in ['en', 'en-US', 'en-GB']:
+                for lang in YouTubeExtractor.TRANSCRIPT_LANGUAGE_FALLBACKS:
                     if lang not in sub_dict:
                         continue
                     for fmt in sub_dict[lang]:
@@ -250,7 +252,7 @@ class YouTubeExtractor:
     @staticmethod
     def _get_transcript_via_youtube_transcript_api(video_id: str) -> Optional[str]:
         """Extract transcript using youtube-transcript-api across v1.x and v0.x APIs."""
-        languages = ["en", "en-US", "en-GB", "a.en"]
+        languages = YouTubeExtractor.TRANSCRIPT_LANGUAGE_FALLBACKS
 
         try:
             api = YouTubeTranscriptApi()
