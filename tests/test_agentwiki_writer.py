@@ -477,6 +477,77 @@ Validation infrastructure is the practical wedge.
             self.assertGreaterEqual(len(chunks), 3)
             self.assertTrue(all("metadata" in chunk and "text" in chunk for chunk in chunks))
             self.assertTrue(any(chunk["metadata"].get("chunk_type") == "raw_transcript" for chunk in chunks))
+            source_text = (notes_dir / source_rel).read_text(encoding="utf-8")
+            self.assertIn("## RAG artifacts", source_text)
+            self.assertIn(bundle["raw_source"], source_text)
+            self.assertIn(bundle["extracted_knowledge"], source_text)
+            self.assertIn(bundle["rag_chunks"], source_text)
+            rag_index = (notes_dir / "Indexes" / "rag-index.md").read_text(encoding="utf-8")
+            self.assertIn(bundle["raw_source"], rag_index)
+            self.assertIn(bundle["extracted_knowledge"], rag_index)
+            self.assertIn(bundle["rag_chunks"], rag_index)
+
+    def test_rag_bundle_marks_derived_context_when_transcript_unavailable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            notes_dir = Path(tmp)
+            writer = AgentWikiWriter(notes_dir)
+            item = {
+                "url": "https://www.youtube.com/watch?v=notranscript1",
+                "video_id": "notranscript1",
+                "title": "Trh roste, ale chipy padají: KONEC AI BOOMU?",
+                "channel": "Dominik Kovarik",
+                "summary": """🔑 KEY TAKEAWAYS
+- Rotácia nie je výpredaj, ale treba sledovať šírku trhu.
+- AI boom sa nemení, ale preceňovanie AI infraštruktúry áno.
+
+📣 CLAIMS
+- Čipová slabosť môže signalizovať sektorovú rotáciu.
+- AI capex musí ukázať návratnosť investícií.
+
+💼 ACTIONABLE IDEAS
+- Sledovať advance-decline líniu a percento akcií nad 50/200 DMA.
+- Porovnať čipové ETF s equal-weight S&P 500.
+""",
+                "transcript": "",
+                "transcript_preview": "",
+                "has_full_transcript": False,
+                "transcript_error": "youtube_ip_blocked",
+                "processed_at": "2026-07-08T07:00:00+00:00",
+                "classification": {
+                    "domain": "Investovanie",
+                    "topic": "Investovanie",
+                    "channel_name": "Dominik Kovarik",
+                    "channel_slug": "dominik-kovarik",
+                    "dataset_use": "rag",
+                    "source_type": "youtube",
+                },
+            }
+            source_rel = writer.write_youtube_note(item, email_meta={}, gmail_account="learning")
+
+            bundle = writer.write_rag_bundle(item, source_rel_path=source_rel, source_type="youtube_video", gmail_account="learning")
+
+            raw_text = (notes_dir / bundle["raw_source"]).read_text(encoding="utf-8")
+            self.assertIn("type: derived_source_context", raw_text)
+            self.assertIn("transcript_available: false", raw_text)
+            self.assertIn("transcript_quality: unavailable_youtube_ip_blocked", raw_text)
+            self.assertIn("source_basis: email_body_and_metadata", raw_text)
+            self.assertNotIn("type: raw_transcript", raw_text)
+            extracted = json.loads((notes_dir / bundle["extracted_knowledge"]).read_text(encoding="utf-8"))
+            self.assertEqual(extracted["transcript_available"], False)
+            self.assertEqual(extracted["source_basis"], "email_body_and_metadata")
+            self.assertNotEqual(extracted["topic"], "Investovanie")
+            self.assertIn("sector", extracted["topic"].lower())
+            chunks = [json.loads(line) for line in (notes_dir / bundle["rag_chunks"]).read_text(encoding="utf-8").splitlines()]
+            self.assertTrue(any(chunk["metadata"].get("chunk_type") == "derived_context" for chunk in chunks))
+            self.assertFalse(any(chunk["metadata"].get("chunk_type") == "raw_transcript" for chunk in chunks))
+            self.assertTrue(all(chunk["metadata"].get("transcript_available") is False for chunk in chunks))
+            source_text = (notes_dir / source_rel).read_text(encoding="utf-8")
+            self.assertIn("## RAG artifacts", source_text)
+            self.assertIn(bundle["raw_source"], source_text)
+            rag_index = (notes_dir / "Indexes" / "rag-index.md").read_text(encoding="utf-8")
+            self.assertIn(bundle["raw_source"], rag_index)
+            self.assertIn(bundle["extracted_knowledge"], rag_index)
+            self.assertIn(bundle["rag_chunks"], rag_index)
 
 
 if __name__ == "__main__":

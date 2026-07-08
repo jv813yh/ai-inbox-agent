@@ -173,10 +173,10 @@ python src/server_runner.py --rag
 
 RAG mode keeps the normal source notes, then adds machine-friendly retrieval artifacts:
 
-1. **Raw source** with stable metadata and content hash.
-2. **Extracted knowledge JSON** with claims, principles, frameworks, risks, metrics, and actionable checklists.
+1. **Raw source** with stable metadata and content hash. If a YouTube transcript is unavailable, this is explicitly labelled `derived_source_context` with `transcript_available: false`, not a raw transcript.
+2. **Extracted knowledge JSON** with claims, principles, frameworks, risks, metrics, actionable checklists, and provenance fields such as `source_basis`.
 3. **Concept candidates** under `Concepts/<domain>/` so repeated ideas can later be merged into durable knowledge notes.
-4. **JSONL chunks** under `RAG/Chunks/` with metadata for vector/keyword indexing.
+4. **JSONL chunks** under `RAG/Chunks/` with metadata for vector/keyword indexing, including `chunk_type`, transcript availability, raw/extracted paths, and retrieval-friendly topic labels.
 
 This is meant for RAG first. Fine-tuning datasets should be generated later from curated Q/A or extraction examples, not directly from raw video summaries.
 
