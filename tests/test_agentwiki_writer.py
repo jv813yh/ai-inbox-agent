@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -413,6 +414,69 @@ Validation infrastructure is the practical wedge.
 
             self.assertNotIn("\ninjected: yes", frontmatter)
             self.assertIn("owner: \"bad injected: yes\"", frontmatter)
+    def test_writes_rag_bundle_for_youtube_source_note(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            notes_dir = Path(tmp)
+            writer = AgentWikiWriter(notes_dir)
+            item = {
+                "url": "https://www.youtube.com/watch?v=rag123xyz00",
+                "video_id": "rag123xyz00",
+                "title": "AI Boom and Chip Rotation",
+                "channel": "Dominik Kovarik",
+                "summary": """🔑 KEY TAKEAWAYS
+- Market breadth matters more than headline index levels.
+- AI capex must eventually prove return on investment.
+
+📣 CLAIMS
+- Chip weakness can signal sector rotation rather than immediate AI boom failure.
+- Investors should track whether AI infrastructure spending turns into cash flow.
+
+💼 ACTIONABLE IDEAS
+- Compare semiconductor ETFs against equal-weight S&P 500.
+- Track earnings commentary about AI capex ROI.
+""",
+                "transcript": "Market breadth matters. AI capex must prove ROI. Watch chip weakness and sector rotation.",
+                "transcript_preview": "Market breadth matters. AI capex must prove ROI.",
+                "has_full_transcript": True,
+                "processed_at": "2026-07-08T07:00:00+00:00",
+                "classification": {
+                    "domain": "Investovanie",
+                    "topic": "AI capex",
+                    "channel_name": "Dominik Kovarik",
+                    "channel_slug": "dominik-kovarik",
+                    "dataset_use": "rag",
+                    "source_type": "youtube",
+                    "method": "known_channel_map",
+                    "confidence": 0.95,
+                },
+            }
+            email_meta = {"from": "sender@example.com", "subject": "rag", "date": "today", "message_id": "msg-rag"}
+            source_rel = writer.write_youtube_note(item, email_meta=email_meta, gmail_account="learning")
+
+            bundle = writer.write_rag_bundle(item, source_rel_path=source_rel, source_type="youtube_video", gmail_account="learning")
+
+            self.assertIn("raw_source", bundle)
+            self.assertIn("extracted_knowledge", bundle)
+            self.assertIn("concept_notes", bundle)
+            self.assertIn("rag_chunks", bundle)
+            raw_text = (notes_dir / bundle["raw_source"]).read_text(encoding="utf-8")
+            self.assertIn("type: raw_transcript", raw_text)
+            self.assertIn("sha256:", raw_text)
+            self.assertIn("Market breadth matters", raw_text)
+            extracted = json.loads((notes_dir / bundle["extracted_knowledge"]).read_text(encoding="utf-8"))
+            self.assertEqual(extracted["source_note"], source_rel)
+            self.assertEqual(extracted["domain"], "Investovanie")
+            self.assertIn("claims", extracted)
+            self.assertIn("actionable_checklists", extracted)
+            self.assertGreaterEqual(len(extracted["claims"]), 2)
+            self.assertTrue(any(path.startswith("Concepts/Investovanie/") for path in bundle["concept_notes"]))
+            concept_text = (notes_dir / bundle["concept_notes"][0]).read_text(encoding="utf-8")
+            self.assertIn("type: concept_candidate", concept_text)
+            self.assertIn("source_notes:", concept_text)
+            chunks = [json.loads(line) for line in (notes_dir / bundle["rag_chunks"]).read_text(encoding="utf-8").splitlines()]
+            self.assertGreaterEqual(len(chunks), 3)
+            self.assertTrue(all("metadata" in chunk and "text" in chunk for chunk in chunks))
+            self.assertTrue(any(chunk["metadata"].get("chunk_type") == "raw_transcript" for chunk in chunks))
 
 
 if __name__ == "__main__":

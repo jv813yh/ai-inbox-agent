@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import posixpath
 from pathlib import Path
@@ -193,6 +195,45 @@ def _learning_artifact(summary: str) -> str:
     return "\n\n".join(part for part in parts if part).strip()
 
 
+def _bullet_items(text: str, *, limit: int = 8) -> list[str]:
+    items: list[str] = []
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith(('- ', '* ')):
+            item = line[2:].strip()
+        elif re.match(r"^\d+[.)]\s+", line):
+            item = re.sub(r"^\d+[.)]\s+", "", line).strip()
+        else:
+            continue
+        if item and item not in items:
+            items.append(item)
+        if len(items) >= limit:
+            break
+    return items
+
+
+def _chunk_text(text: str, *, max_chars: int = 1200) -> list[str]:
+    clean = "\n".join(line.strip() for line in (text or "").splitlines() if line.strip())
+    if not clean:
+        return []
+    paragraphs = re.split(r"\n{2,}", clean)
+    chunks: list[str] = []
+    current = ""
+    for para in paragraphs:
+        if not para:
+            continue
+        if current and len(current) + len(para) + 2 > max_chars:
+            chunks.append(current.strip())
+            current = para
+        else:
+            current = f"{current}\n\n{para}".strip() if current else para
+    if current:
+        chunks.append(current.strip())
+    return chunks or [clean[:max_chars]]
+
+
 class AgentWikiWriter:
     """Safe writer for HumanAgentWiki Markdown notes and index notes."""
 
@@ -312,6 +353,213 @@ class AgentWikiWriter:
         if isinstance(existing, Mapping):
             return existing
         return classify_youtube_item(item)
+
+    @staticmethod
+    def _rag_classification(item: Mapping[str, Any], source_type: str) -> Mapping[str, Any]:
+        existing = item.get("classification")
+        if isinstance(existing, Mapping):
+            return existing
+        if source_type == "youtube_video":
+            return classify_youtube_item(item)
+        if source_type == "web_article":
+            return classify_article_item(item)
+        if source_type == "plain_email":
+            return classify_plain_email_item(item)
+        return {}
+
+    @staticmethod
+    def _rag_source_id(item: Mapping[str, Any], source_type: str) -> str:
+        if source_type == "youtube_video":
+            return str(item.get("video_id") or AgentWikiWriter._video_id_from_url(str(item.get("url", ""))) or slugify(str(item.get("title") or "youtube")))
+        if source_type == "github_project":
+            return f"{item.get('owner', 'unknown')}/{item.get('repo', 'unknown')}"
+        return str(item.get("url") or item.get("subject") or item.get("title") or source_type)
+
+    def _append_jsonl(self, rel_path: str, rows: list[dict[str, Any]]) -> str:
+        path = self._safe_path(rel_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        existing_ids: set[str] = set()
+        if path.exists():
+            for line in path.read_text(encoding="utf-8").splitlines():
+                try:
+                    existing_ids.add(str(json.loads(line).get("id")))
+                except Exception:
+                    continue
+        with path.open("a", encoding="utf-8") as fh:
+            for row in rows:
+                if row["id"] in existing_ids:
+                    continue
+                fh.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+                existing_ids.add(row["id"])
+        return path.relative_to(self.notes_dir).as_posix()
+
+    def write_rag_bundle(
+        self,
+        item: Mapping[str, Any],
+        *,
+        source_rel_path: str,
+        source_type: str,
+        gmail_account: str,
+    ) -> dict[str, Any]:
+        """Write RAG-ready artifacts for one processed source.
+
+        This creates four layers:
+        1. Raw Sources: immutable-ish transcript/source text with sha256.
+        2. Extracted Knowledge: structured JSON claims/principles/actions.
+        3. Concepts: candidate concept pages that can later be curated/merged.
+        4. RAG/Chunks: JSONL chunks with metadata for vector/keyword indexing.
+        """
+        classification = self._rag_classification(item, source_type)
+        domain = str(classification.get("domain") or item.get("domain") or "Ostatne")
+        topic = str(classification.get("topic") or item.get("topic") or domain)
+        title = str(item.get("title") or item.get("subject") or item.get("url") or "RAG source")
+        source_id = self._rag_source_id(item, source_type)
+        source_slug = slugify(source_id, max_length=40)
+        title_slug = slugify(title, max_length=70)
+        processed_at = str(item.get("processed_at") or "")
+        date_prefix = processed_at[:10] or "undated"
+        summary = str(item.get("summary") or "")
+        raw_text = str(item.get("transcript") or item.get("full_transcript") or item.get("transcript_preview") or item.get("body") or summary)
+        raw_hash = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
+
+        source_folder = {
+            "youtube_video": "YouTube",
+            "web_article": "Articles",
+            "plain_email": "Emails",
+            "github_project": "GitHub",
+        }.get(source_type, slugify(source_type))
+        channel_or_host = str(classification.get("channel_name") or item.get("channel") or classification.get("source_host") or self._domain_from_url(str(item.get("url", ""))) or "source")
+        raw_rel = f"Raw Sources/{source_folder}/{slugify(channel_or_host)}/{date_prefix}--{source_slug}--{title_slug}.md"
+        raw_front = _frontmatter({
+            "title": title,
+            "type": "raw_transcript" if source_type == "youtube_video" else "raw_source",
+            "source_type": source_type,
+            "source_id": source_id,
+            "source_url": item.get("url", ""),
+            "source_note": source_rel_path,
+            "domain": domain,
+            "topic": topic,
+            "language": item.get("language", ""),
+            "transcript_quality": item.get("transcript_quality", "unknown"),
+            "sha256": raw_hash,
+            "dataset_use": "rag",
+            "gmail_account": gmail_account,
+            "processed_at": processed_at,
+        })
+        raw_front = raw_front.replace(f"source_note: {source_rel_path}", f"source_note: \"{source_rel_path}\"")
+        self._write_note(raw_rel, raw_front + f"\n\n# Raw source - {title}\n\n{raw_text}")
+
+        sections = _youtube_structured_sections(item, classification) if source_type == "youtube_video" else {
+            "key_points": _extract_summary_section(summary, "KEY TAKEAWAYS") or _first_non_empty_lines(summary, limit=5),
+            "claims": _extract_summary_section(summary, "CLAIMS") or _first_non_empty_lines(summary, limit=5),
+            "actionable_ideas": _extract_summary_section(summary, "ACTIONABLE IDEAS", "HOW TO APPLY THIS IN PRACTICE") or str(item.get("my_take") or ""),
+            "entities": str(item.get("title") or ""),
+            "my_take": str(item.get("my_take") or ""),
+        }
+        claims = _bullet_items(sections.get("claims", ""), limit=12) or _bullet_items(sections.get("key_points", ""), limit=8)
+        principles = _bullet_items(sections.get("key_points", ""), limit=12)
+        actions = _bullet_items(sections.get("actionable_ideas", ""), limit=12)
+        concepts = []
+        for value in [topic, *principles[:4], *claims[:4]]:
+            clean = re.sub(r"^[A-Za-z ]+:\s*", "", value).strip(" .")
+            if clean and len(clean) >= 4:
+                concepts.append(clean[:90])
+        seen_concepts: list[str] = []
+        for concept in concepts:
+            if slugify(concept) not in [slugify(c) for c in seen_concepts]:
+                seen_concepts.append(concept)
+        extracted = {
+            "schema_version": 1,
+            "source_note": source_rel_path,
+            "raw_source": raw_rel,
+            "source_type": source_type,
+            "source_id": source_id,
+            "source_url": item.get("url", ""),
+            "title": title,
+            "domain": domain,
+            "topic": topic,
+            "speaker_or_channel": channel_or_host,
+            "claim_kind_default": "author_opinion" if domain == "Investovanie" else "source_claim",
+            "claims": [{"text": claim, "claim_kind": "author_opinion" if domain == "Investovanie" else "source_claim", "confidence": "medium"} for claim in claims],
+            "principles": principles,
+            "frameworks": seen_concepts[:8],
+            "examples": _bullet_items(sections.get("entities", ""), limit=8),
+            "metrics": [c for c in claims + principles if re.search(r"\d|%|roi|capex|dma|etf", c, re.I)],
+            "risks": [c for c in claims + principles if re.search(r"risk|weak|slab|warning|pozor|volatil|drawdown|bubble|hype", c, re.I)],
+            "actionable_checklists": actions,
+            "open_questions": _bullet_items(_extract_summary_section(summary, "QUESTIONS TO REFLECT ON"), limit=8),
+            "processed_at": processed_at,
+        }
+        extracted_rel = f"Extracted Knowledge/{source_folder}/{date_prefix}--{source_slug}--{title_slug}.json"
+        extracted_path = self._safe_path(extracted_rel)
+        extracted_path.parent.mkdir(parents=True, exist_ok=True)
+        extracted_path.write_text(json.dumps(extracted, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        concept_notes: list[str] = []
+        for concept in seen_concepts[:6]:
+            concept_slug = slugify(concept, max_length=70)
+            concept_rel = f"Concepts/{domain}/{concept_slug}.md"
+            path = self._safe_path(concept_rel)
+            if path.exists():
+                text = path.read_text(encoding="utf-8")
+                link = f"- `{source_rel_path}`"
+                if link not in text:
+                    text = text.rstrip() + f"\n{link}\n"
+                    path.write_text(text, encoding="utf-8")
+            else:
+                front = _frontmatter({
+                    "title": concept,
+                    "type": "concept_candidate",
+                    "domain": domain,
+                    "topic": topic,
+                    "tags": ["concept", "rag", "ai-inbox", domain],
+                    "source_notes": [source_rel_path],
+                    "source_type": source_type,
+                    "confidence": "medium",
+                    "dataset_use": "rag",
+                    "updated": date_prefix,
+                })
+                body = f"""# {concept}
+
+## Definition / working meaning
+Candidate concept extracted from `{source_rel_path}`.
+
+## Source-backed insights
+- Review and merge this candidate into a durable concept note when it appears across multiple sources.
+
+## Source notes
+- `{source_rel_path}`
+
+## Related
+- [[{title}]]
+- [[RAG Index]]
+"""
+                self._write_note(concept_rel, front + "\n\n" + body)
+            concept_notes.append(concept_rel)
+
+        chunk_rows: list[dict[str, Any]] = []
+        base_meta = {
+            "source_type": source_type,
+            "source_id": source_id,
+            "source_url": item.get("url", ""),
+            "source_note": source_rel_path,
+            "raw_source": raw_rel,
+            "extracted_knowledge": extracted_rel,
+            "domain": domain,
+            "topic": topic,
+            "title": title,
+            "channel": channel_or_host,
+            "dataset_use": "rag",
+        }
+        for idx, chunk in enumerate(_chunk_text(raw_text), start=1):
+            chunk_rows.append({"id": f"{source_type}:{source_id}:raw:{idx:04d}", "text": chunk, "metadata": {**base_meta, "chunk_type": "raw_transcript" if source_type == "youtube_video" else "raw_source", "chunk_index": idx}})
+        for name, text in [("summary", summary), ("claims", "\n".join(claims)), ("actions", "\n".join(actions)), ("concepts", "\n".join(seen_concepts))]:
+            if text.strip():
+                chunk_rows.append({"id": f"{source_type}:{source_id}:{name}", "text": text.strip(), "metadata": {**base_meta, "chunk_type": name, "chunk_index": 0}})
+        chunks_rel = f"RAG/Chunks/{date_prefix}--{source_slug}--{title_slug}.jsonl"
+        self._append_jsonl(chunks_rel, chunk_rows)
+        self._upsert_index("Indexes/rag-index.md", "RAG Index", ["index", "rag", "ai-inbox"], f"- [[{title}]] — {domain} / {topic} — source `{source_rel_path}` — chunks `{chunks_rel}`")
+        return {"raw_source": raw_rel, "extracted_knowledge": extracted_rel, "concept_notes": concept_notes, "rag_chunks": chunks_rel}
 
     def write_learning_note_if_useful(
         self,
