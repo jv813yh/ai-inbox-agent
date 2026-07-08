@@ -107,7 +107,25 @@ class ExtractorFallbackTests(unittest.TestCase):
             transcript = YouTubeExtractor.get_transcript("https://youtu.be/abc123xyz00")
 
         self.assertEqual(transcript, "hello world")
-        self.assertEqual(FakeTranscriptApi.calls, [("abc123xyz00", ("en", "en-US", "en-GB", "a.en"), False)])
+        self.assertEqual(FakeTranscriptApi.calls, [("abc123xyz00", ("en", "en-US", "en-GB", "a.en", "cs", "a.cs", "sk", "a.sk"), False)])
+
+    def test_youtube_transcript_api_v1_fetch_includes_czech_and_slovak_fallbacks(self):
+        class FakeTranscriptApi:
+            calls = []
+            def fetch(self, video_id, languages=("en",), preserve_formatting=False):
+                FakeTranscriptApi.calls.append((video_id, tuple(languages), preserve_formatting))
+                return [{"text": "ahoj"}, {"text": "svet"}]
+
+        with patch.object(YouTubeExtractor, "_get_transcript_via_ytdlp", return_value=None), \
+             patch("extractors_full.YouTubeTranscriptApi", return_value=FakeTranscriptApi()):
+            transcript = YouTubeExtractor.get_transcript("https://youtu.be/abc123xyz00")
+
+        self.assertEqual(transcript, "ahoj svet")
+        languages = FakeTranscriptApi.calls[0][1]
+        self.assertLess(languages.index("cs"), len(languages))
+        self.assertLess(languages.index("sk"), len(languages))
+        self.assertIn("a.cs", languages)
+        self.assertIn("a.sk", languages)
 
     def test_youtube_transcript_api_v1_fetch_handles_raw_dict_items(self):
         class FakeTranscriptApi:
