@@ -148,6 +148,7 @@ def process_messages(
     gmail_account: str = "learning",
     dry_run: bool = False,
     include_plain_emails: bool = False,
+    rag: bool = False,
 ) -> tuple[str, list[str]]:
     """Process fetched Gmail messages.
 
@@ -250,6 +251,7 @@ def process_messages(
                 )
                 if learning_rel:
                     writer.upsert_learning_index(item, learning_rel, rel_path)
+                rag_bundle = writer.write_rag_bundle(item, source_rel_path=rel_path, source_type="youtube_video", gmail_account=gmail_account) if rag else None
                 store.record_source(
                     source_type="youtube",
                     source_id=str(item.get("video_id") or source_id_for_youtube_url(str(item.get("url", "")))),
@@ -261,6 +263,8 @@ def process_messages(
                 digest_lines.append(f"🎥 {item.get('title', 'YouTube video')} — {channel} → {rel_path}")
                 if learning_rel:
                     digest_lines.append(f"🧠 Learning → {learning_rel}")
+                if rag_bundle:
+                    digest_lines.append(f"🧩 RAG → {rag_bundle.get('rag_chunks', '')}")
                 wrote_anything = True
 
         if github_urls:
@@ -268,6 +272,7 @@ def process_messages(
             for item in github_items:
                 rel_path = writer.write_github_note(item, email_meta=msg.email_meta, gmail_account=gmail_account)
                 writer.upsert_github_index(item, rel_path)
+                rag_bundle = writer.write_rag_bundle(item, source_rel_path=rel_path, source_type="github_project", gmail_account=gmail_account) if rag else None
                 store.record_source(
                     source_type="github",
                     source_id=f"{item.get('owner', '')}/{item.get('repo', '')}",
@@ -278,6 +283,8 @@ def process_messages(
                 desc = str(item.get('description') or '').strip()
                 desc_suffix = f" — {desc[:120]}" if desc else ""
                 digest_lines.append(f"🐙 {item.get('owner', '')}/{item.get('repo', '')}{desc_suffix} → {rel_path}")
+                if rag_bundle:
+                    digest_lines.append(f"🧩 RAG → {rag_bundle.get('rag_chunks', '')}")
                 wrote_anything = True
 
         if article_urls:
@@ -294,6 +301,7 @@ def process_messages(
                 )
                 if learning_rel:
                     writer.upsert_learning_index(item, learning_rel, rel_path)
+                rag_bundle = writer.write_rag_bundle(item, source_rel_path=rel_path, source_type="web_article", gmail_account=gmail_account) if rag else None
                 store.record_source(
                     source_type="article",
                     source_id=source_id_for_article_url(str(item.get("url", ""))),
@@ -304,6 +312,8 @@ def process_messages(
                 digest_lines.append(f"📰 {item.get('title', 'Web article')} → {rel_path}")
                 if learning_rel:
                     digest_lines.append(f"🧠 Learning → {learning_rel}")
+                if rag_bundle:
+                    digest_lines.append(f"🧩 RAG → {rag_bundle.get('rag_chunks', '')}")
                 wrote_anything = True
 
         if plain_candidate and not has_links:
@@ -312,7 +322,10 @@ def process_messages(
                 item.setdefault("classification", classify_plain_email_item(item, email_text=email_text))
                 rel_path = writer.write_plain_email_note(item, email_meta=msg.email_meta, gmail_account=gmail_account)
                 writer.upsert_plain_email_index(item, rel_path)
+                rag_bundle = writer.write_rag_bundle(item, source_rel_path=rel_path, source_type="plain_email", gmail_account=gmail_account) if rag else None
                 digest_lines.append(f"✉️ {item.get('subject', msg.subject or 'Email')} → {rel_path}")
+                if rag_bundle:
+                    digest_lines.append(f"🧩 RAG → {rag_bundle.get('rag_chunks', '')}")
                 wrote_anything = True
 
         failed_processing = (has_links or plain_candidate) and not wrote_anything
@@ -663,6 +676,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="After the digest, print and save pending-review AI implementation suggestions from created HumanAgentWiki notes.",
     )
+    parser.add_argument(
+        "--rag",
+        action="store_true",
+        help="Write RAG-ready artifacts: raw sources, extracted knowledge JSON, concept candidates, and JSONL chunks.",
+    )
     return parser
 
 
@@ -677,6 +695,7 @@ def main() -> int:
         gmail_account=args.gmail_account,
         dry_run=args.dry_run,
         include_plain_emails=args.include_plain_emails,
+        rag=args.rag,
     )
     index_ok = True
     if successful_ids:

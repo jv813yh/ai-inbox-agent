@@ -44,6 +44,7 @@ Telegram digest / HumanAgentWiki / pending-review suggestions
 | **Article/newsletter processing** | Extracts web article content and summarizes it into structured notes. |
 | **Plain email summaries** | Summarizes long emails even when no supported link is present. |
 | **HumanAgentWiki / Obsidian notes** | Writes Markdown notes, daily digests, indexes, and AI Learning System notes. |
+| **RAG mode** | Writes raw sources, extracted knowledge JSON, concept candidates, and JSONL chunks for retrieval systems. |
 | **Outcome mode** | Prints compact practical takeaways from newly created notes. |
 | **Suggestions mode** | Saves pending-review implementation ideas for a human to approve/modify/reject. |
 | **Dedupe state** | Avoids reprocessing the same YouTube video, GitHub repo, article, or Gmail message. |
@@ -112,6 +113,7 @@ Useful variants:
 ```bash
 python src/server_runner.py --with-outcome
 python src/server_runner.py --with-suggestions
+python src/server_runner.py --rag
 python src/server_runner.py --dry-run --max-emails 3
 ```
 
@@ -121,6 +123,7 @@ Machine-specific wrapper scripts are intentionally not committed. A deployment c
 ai_inbox_learning_agent.sh
 ai_inbox_learning_agent_with_outcome.sh
 ai_inbox_learning_agent_with_suggestions.sh
+ai_inbox_learning_agent_rag.sh
 ```
 
 ---
@@ -139,6 +142,10 @@ In HumanAgentWiki/Obsidian mode, the runner writes Markdown files like these:
 | AI Learning note | `AI Learning System/<domain>/<slug>.md` |
 | Daily digest | `Daily Personal AI news/YYYY-MM-DD/HHMM/ai-inbox-agent.md` |
 | Suggestions review note | `AI Suggestions/YYYY-MM-DD/HHMM/ai-inbox-agent-suggestions.md` |
+| Raw RAG source | `Raw Sources/YouTube/<channel>/YYYY-MM-DD--<id>--<slug>.md` |
+| Extracted knowledge JSON | `Extracted Knowledge/YouTube/YYYY-MM-DD--<id>--<slug>.json` |
+| Concept candidate | `Concepts/<domain>/<concept>.md` |
+| RAG chunks JSONL | `RAG/Chunks/YYYY-MM-DD--<id>--<slug>.jsonl` |
 | Indexes | `Indexes/*.md` |
 
 ---
@@ -155,6 +162,23 @@ In HumanAgentWiki/Obsidian mode, the runner writes Markdown files like these:
 | Subject contains `no check` | Reprocess the source even if it was already seen. |
 
 YouTube transcript extraction can be blocked on cloud/server IPs. When that happens, the pipeline can still use email context and metadata so the run produces a useful note instead of failing completely.
+
+---
+
+## RAG mode
+
+```bash
+python src/server_runner.py --rag
+```
+
+RAG mode keeps the normal source notes, then adds machine-friendly retrieval artifacts:
+
+1. **Raw source** with stable metadata and content hash.
+2. **Extracted knowledge JSON** with claims, principles, frameworks, risks, metrics, and actionable checklists.
+3. **Concept candidates** under `Concepts/<domain>/` so repeated ideas can later be merged into durable knowledge notes.
+4. **JSONL chunks** under `RAG/Chunks/` with metadata for vector/keyword indexing.
+
+This is meant for RAG first. Fine-tuning datasets should be generated later from curated Q/A or extraction examples, not directly from raw video summaries.
 
 ---
 

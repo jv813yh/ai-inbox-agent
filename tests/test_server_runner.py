@@ -35,6 +35,11 @@ class ServerRunnerRoutingTests(unittest.TestCase):
 
         self.assertTrue(args.with_suggestions)
 
+    def test_parser_accepts_rag_flag(self):
+        args = build_arg_parser().parse_args(["--rag"])
+
+        self.assertTrue(args.rag)
+
     def test_classifies_youtube_and_github_links_from_email_body(self):
         body = """
         Watch https://www.youtube.com/watch?v=abc123xyz00&feature=share
@@ -858,6 +863,72 @@ Skill and approval loop ideas.
         self.assertEqual(row[0], "processed")
         self.assertIn("Reprocessed video", digest)
         self.assertNotIn("skipped duplicate", digest.lower())
+    def test_process_messages_writes_rag_bundle_when_enabled(self):
+        class FakeContentPreparator:
+            @staticmethod
+            def prepare_youtube_batch(urls, email_body=""):
+                return [
+                    {
+                        "url": urls[0],
+                        "video_id": "rag123xyz00",
+                        "title": "AI Boom and Chip Rotation",
+                        "channel": "Dominik Kovarik",
+                        "summary": """🔑 KEY TAKEAWAYS
+- Market breadth matters more than headline index levels.
+
+📣 CLAIMS
+- Chip weakness can signal sector rotation rather than immediate AI boom failure.
+
+💼 ACTIONABLE IDEAS
+- Compare semiconductor ETFs against equal-weight S&P 500.
+""",
+                        "transcript": "Market breadth matters. AI capex must prove ROI.",
+                        "transcript_preview": "Market breadth matters.",
+                        "has_full_transcript": True,
+                        "processed_at": "2026-07-08T07:00:00+00:00",
+                        "classification": {
+                            "domain": "Investovanie",
+                            "topic": "AI capex",
+                            "channel_name": "Dominik Kovarik",
+                            "channel_slug": "dominik-kovarik",
+                            "dataset_use": "rag",
+                            "source_type": "youtube",
+                            "method": "known_channel_map",
+                            "confidence": 0.95,
+                        },
+                    }
+                ]
+
+            @staticmethod
+            def prepare_github_batch(urls):
+                return []
+
+            @staticmethod
+            def prepare_article_batch(urls, **kwargs):
+                return []
+
+        with tempfile.TemporaryDirectory() as tmp, patch("src.server_runner._lazy_content_preparator", return_value=FakeContentPreparator):
+            root = Path(tmp)
+            msg = GmailMessage(
+                id="msg-rag-video",
+                thread_id="thread-1",
+                subject="RAG video",
+                from_addr="sender@example.com",
+                date="today",
+                body="https://youtu.be/rag123xyz00",
+            )
+
+            digest, successful_ids = process_messages([msg], notes_dir=root / "notes", state_db=root / "state.sqlite", rag=True)
+            rag_files = list((root / "notes" / "RAG" / "Chunks").glob("*.jsonl"))
+            raw_files = list((root / "notes" / "Raw Sources" / "YouTube").glob("*/*.md"))
+            concept_files = list((root / "notes" / "Concepts" / "Investovanie").glob("*.md"))
+
+        self.assertEqual(successful_ids, ["msg-rag-video"])
+        self.assertEqual(len(rag_files), 1)
+        self.assertEqual(len(raw_files), 1)
+        self.assertGreaterEqual(len(concept_files), 1)
+        self.assertIn("🧩 RAG", digest)
+        self.assertIn("RAG/Chunks/", digest)
 
 
 if __name__ == "__main__":
