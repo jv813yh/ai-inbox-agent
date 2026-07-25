@@ -38,6 +38,10 @@ from email.mime.multipart import MIMEMultipart
 from email.utils import parsedate_to_datetime
 from bs4 import BeautifulSoup
 from anthropic import Anthropic
+try:
+    from . import llm
+except ImportError:
+    import llm
 
 # ── AI keywords (fallback when Claude is unavailable) ────────────────────────
 
@@ -462,7 +466,7 @@ def filter_with_claude(items: list) -> list:
 
     try:
         client = Anthropic(api_key=api_key)
-        response = client.messages.create(
+        response = llm.create_message(
             model='claude-haiku-4-5-20251001',
             max_tokens=256,
             messages=[{'role': 'user', 'content': prompt}],

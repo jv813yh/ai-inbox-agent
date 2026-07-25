@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     from extractors_full import YouTubeExtractor, GitHubExtractor, ContentPreparator, WebArticleExtractor
     from prompt_builder import PromptBuilder
+    import llm
 except ImportError:
     print("❌ Error: extractors_full.py or prompt_builder.py not found in src/")
     sys.exit(1)
@@ -458,7 +459,7 @@ class EmailBot:
     def _summarize_plain_email(self, email_data: Dict) -> Dict:
         """Summarize a plain email using Claude"""
         try:
-            response = client.messages.create(
+            response = llm.create_message(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=1024,
                 messages=[{

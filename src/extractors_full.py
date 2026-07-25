@@ -19,8 +19,10 @@ from bs4 import BeautifulSoup
 
 try:
     from .prompt_builder import PromptBuilder
+    from . import llm
 except ImportError:
     from prompt_builder import PromptBuilder
+    import llm
 
 client = Anthropic(
     api_key=(
@@ -333,7 +335,7 @@ class YouTubeExtractor:
 
             prompt = PromptBuilder.youtube(title, description, transcript, email_context)
             
-            response = client.messages.create(
+            response = llm.create_message(
                 model="claude-opus-4-6",
                 max_tokens=4000,
                 messages=[{"role": "user", "content": prompt}]
@@ -437,7 +439,7 @@ class GitHubExtractor:
             
             prompt = PromptBuilder.github(repo_info)
             
-            response = client.messages.create(
+            response = llm.create_message(
                 model="claude-opus-4-6",
                 max_tokens=2000,
                 messages=[{"role": "user", "content": prompt}]
@@ -612,7 +614,7 @@ class WebArticleExtractor:
                 article_data['url'],
                 article_data['content'],
             )
-            response = client.messages.create(
+            response = llm.create_message(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=1000,
                 messages=[{"role": "user", "content": prompt}],
@@ -734,7 +736,7 @@ class ContentPreparator:
         try:
             print(f"\n✉️ Processing plain email: {subject[:80]}")
             prompt = PromptBuilder.plain_email(subject=subject, from_addr=from_addr, body=body[:5000])
-            response = client.messages.create(
+            response = llm.create_message(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=1000,
                 messages=[{"role": "user", "content": prompt}],
