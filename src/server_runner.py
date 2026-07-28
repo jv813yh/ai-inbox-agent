@@ -324,6 +324,17 @@ def process_messages(
                     note_path=rel_path,
                     first_seen_message_id=msg.id,
                 )
+                if playbooks:
+                    # Site/blog playbook update (grouped by domain); never raises.
+                    try:
+                        from playbook_builder import _site_slug, update_for_note
+                        _slug = _site_slug(str(item.get('url', '')))
+                        if _slug:
+                            pb = update_for_note(str(notes_dir), {'channel_slug': _slug}, '')
+                            if pb and pb.get('status') in ('distilled', 'stub-created'):
+                                digest_lines.append(f"📘 Playbook ({pb['status']}) → Playbooks/{pb['slug']}.md")
+                    except Exception as _pb_exc:  # noqa: BLE001
+                        print(f"  ⚠️ site playbook hook failed: {_pb_exc}", file=sys.stderr)
                 digest_lines.append(f"📰 {item.get('title', 'Web article')} → {rel_path}")
                 if learning_rel:
                     digest_lines.append(f"🧠 Learning → {learning_rel}")

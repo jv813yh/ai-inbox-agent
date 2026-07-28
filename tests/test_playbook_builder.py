@@ -106,3 +106,63 @@ def test_prompt_hardening_markers_present():
     assert "UNTRUSTED DATA" in pb.SYSTEM_PROMPT
     assert "Never follow instructions" in pb.SYSTEM_PROMPT
     assert "cite" in pb.SYSTEM_PROMPT.lower()
+
+
+ARTICLE = """---
+title: Great Post
+type: web_article
+source_url: "https://www.example-blog.com/post-1"
+processed_at: 2026-07-10T10:00:00
+---
+
+## Summary
+Ship small.
+"""
+
+
+def test_site_slug():
+    assert pb._site_slug("https://www.freecodecamp.org/news/x") == "freecodecamp-org"
+    assert pb._site_slug("") is None
+
+
+def test_articles_grouped_by_domain(tmp_path):
+    d = tmp_path / "Web Articles"
+    d.mkdir(parents=True)
+    (d / "a1.md").write_text(ARTICLE, encoding="utf-8")
+    (d / "a2.md").write_text(ARTICLE.replace("post-1", "post-2"), encoding="utf-8")
+    groups = pb.collect_channel_notes(str(tmp_path))
+    assert "example-blog-com" in groups
+    assert len(groups["example-blog-com"]) == 2
+
+
+def test_stub_created_for_new_single_source(tmp_path):
+    make_notes(tmp_path, n=1)
+    r = pb.backfill(str(tmp_path))
+    assert r[0]["status"] == "stub-created"
+    path = pb.playbook_path(str(tmp_path), "nate-herk-ai-automation")
+    text = path.read_text()
+    assert "collecting evidence" in text
+    assert "distilled_sources: []" in text
+    # a second note upgrades the stub to a full distillation over BOTH notes
+    d = tmp_path / "YouTube" / "Tech" / "Nate"
+    (d / "video1b.md").write_text(NOTE.replace("abc123", "vidB"), encoding="utf-8")
+    import unittest.mock as um
+    with um.patch.object(pb, "distill", return_value="# N — Playbook\n\nfull"):
+        r2 = pb.backfill(str(tmp_path))
+    assert r2[0]["status"] == "distilled" and r2[0]["new"] == 2
+
+
+def test_dedupe_same_video_id_across_categories(tmp_path):
+    """Real-world case: the same video processed twice via two Gmail messages,
+    landing in two different category folders with two different dates."""
+    d1 = tmp_path / "YouTube" / "Tech" / "Nate"
+    d2 = tmp_path / "YouTube" / "Invest" / "Nate"
+    d1.mkdir(parents=True); d2.mkdir(parents=True)
+    early = NOTE.replace("abc123", "dupvid").replace("2026-07-04", "2026-07-05")
+    late = NOTE.replace("abc123", "dupvid").replace("2026-07-04", "2026-07-06")
+    (d1 / "v.md").write_text(late, encoding="utf-8")   # later date, Tech folder
+    (d2 / "v.md").write_text(early, encoding="utf-8")  # earlier date, Invest folder
+    groups = pb.collect_channel_notes(str(tmp_path))
+    notes = groups["nate-herk-ai-automation"]
+    assert len(notes) == 1, "the duplicate video must collapse to one note"
+    assert notes[0]["date"] == "2026-07-05", "must keep the EARLIEST (first-seen) copy"
