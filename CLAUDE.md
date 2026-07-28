@@ -63,6 +63,8 @@ python src/server_runner.py --with-suggestions --dry-run
 | `src/extractors_full.py` | YouTube/GitHub/web/plain-email content extraction and summarization. |
 | `src/agentwiki_writer.py` | HumanAgentWiki/Markdown note writer and index updater. |
 | `src/state_store.py` | SQLite dedupe and message status store. |
+| `src/playbook_builder.py` | Channel Playbooks: evidence-cited methodology distillation per YouTube channel (`--playbooks` flag / `--backfill` CLI). |
+| `src/llm.py` | Resilient LLM calls: retry on 5xx/connection errors + provider fallback. |
 | `src/prompt_builder.py`, `src/prompts.py` | Prompt construction and versioned prompt constants. |
 
 ## Public-repo hygiene

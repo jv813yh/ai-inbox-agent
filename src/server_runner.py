@@ -13,6 +13,7 @@ import argparse
 import os
 import re
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -149,6 +150,7 @@ def process_messages(
     dry_run: bool = False,
     include_plain_emails: bool = False,
     rag: bool = False,
+    playbooks: bool = False,
 ) -> tuple[str, list[str]]:
     """Process fetched Gmail messages.
 
@@ -260,6 +262,19 @@ def process_messages(
                     first_seen_message_id=msg.id,
                 )
                 channel = item.get('channel') or (item.get('classification') or {}).get('channel_name') or 'Unknown Channel'
+                if playbooks:
+                    # Incremental playbook update for this channel. Reads the just-
+                    # written note's frontmatter for the authoritative slug; never
+                    # raises (a playbook failure must not fail the email run).
+                    try:
+                        from playbook_builder import parse_frontmatter as _pb_fm, update_for_note
+                        note_file = Path(notes_dir) / rel_path
+                        fm_note, _ = _pb_fm(note_file.read_text(encoding='utf-8'))
+                        pb = update_for_note(str(notes_dir), fm_note, '')
+                        if pb and pb.get('status') == 'distilled':
+                            digest_lines.append(f"📘 Playbook updated → Playbooks/{pb['slug']}.md ({pb['total']} sources)")
+                    except Exception as _pb_exc:  # noqa: BLE001
+                        print(f"  ⚠️ playbook hook failed: {_pb_exc}", file=sys.stderr)
                 digest_lines.append(f"🎥 {item.get('title', 'YouTube video')} — {channel} → {rel_path}")
                 if learning_rel:
                     digest_lines.append(f"🧠 Learning → {learning_rel}")
@@ -681,6 +696,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Write RAG-ready artifacts: raw sources, extracted knowledge JSON, concept candidates, and JSONL chunks.",
     )
+    parser.add_argument(
+        "--playbooks",
+        action="store_true",
+        help="After each new YouTube note, update that channel's evidence-cited methodology playbook (notes/Playbooks/<slug>.md).",
+    )
     return parser
 
 
@@ -696,6 +716,7 @@ def main() -> int:
         dry_run=args.dry_run,
         include_plain_emails=args.include_plain_emails,
         rag=args.rag,
+        playbooks=args.playbooks,
     )
     index_ok = True
     if successful_ids:
